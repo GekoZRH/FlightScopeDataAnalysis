@@ -107,7 +107,8 @@ function sessionChart(id, dates, series, { title, band = false, height }) {
   if (height) $(id).style.height = height + "px";
   draw(id, traces, baseLayout({
     showlegend: series.length > 1,
-    xaxis: { type: "category", tickvals: dates, ticktext: dates.map(dateLabel), showgrid: true },
+    // the order must be given: Plotly otherwise orders categories by first appearance, and the band skips sessions without data
+    xaxis: { type: "category", categoryorder: "array", categoryarray: dates, tickvals: dates, ticktext: dates.map(dateLabel), showgrid: true },
     yaxis: { title: { text: title }, showgrid: true, gridcolor: css("--border-strong") },
   }));
 }
