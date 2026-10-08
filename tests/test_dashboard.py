@@ -202,11 +202,29 @@ def test_pitching_review_has_speed_carry_and_lateral(state):
     assert row["verdict"] in (-1, 0, 1)                           # 8 shots against 32 before
 
 
-def test_accuracy_over_time_has_a_series_per_intent(state):
-    d = call(state, "/api/pitching/accuracy", club="gw 50", measure="speed_sd")
-    assert [s["name"] for s in d["series"]] == ["full", "11", "10", "9"]
-    assert len(d["sessions"]) == 6 and all(len(s["y"]) == 6 for s in d["series"])
-    assert call(state, "/api/pitching/accuracy", club="gw 50", measure="lateral_sd")["title"].startswith("Lateral")
+def test_pitching_overview_offers_wedge_and_intent_choices(state):
+    overview = call(state, "/api/pitching/overview")
+    assert overview["choices"] == [{"club": "gw 50", "intents": [12, 11, 10, 9]}]
+    assert {"club_speed_sd", "lat_sd", "carry_sd"} <= {m["key"] for m in overview["measures"]}
+
+
+def test_pitching_progress_is_per_wedge_and_intent(state):
+    full = call(state, "/api/pitching/series", label="gw 50", measure="club_speed")
+    nine = call(state, "/api/pitching/series", label="gw 50_9", measure="club_speed")
+    assert full["title"] == "Club head speed (mph)" and len(full["dates"]) == 6 and len(full["sessions"]) == 6
+    assert all(70 < p["y"] < 86 for p in full["sessions"]) and all(44 < p["y"] < 60 for p in nine["sessions"])
+    spread = call(state, "/api/pitching/series", label="gw 50_10", measure="club_speed_sd")
+    assert spread["title"] == "Club head speed spread, sd (mph)" and all(p["lo"] < p["y"] < p["hi"] for p in spread["sessions"])
+    carry = call(state, "/api/pitching/series", label="gw 50_11", measure="carry_sd")
+    assert carry["title"] == "Carry spread, sd (m, simulated)"
+    assert call(state, "/api/pitching/series", label="gw 50_11", measure="lat_sd")["title"].startswith("Lateral spread")
+
+
+def test_pitching_progress_uses_the_selected_sessions_and_intents(state):
+    call(state, "/api/sessions", method="POST", mode="pitching", selected=session_dates(state, "pitching")[:2])
+    assert len(call(state, "/api/pitching/series", label="gw 50", measure="club_speed")["dates"]) == 2
+    call(state, "/api/wedges", method="POST", pairs=[["gw 50", 12]])
+    assert call(state, "/api/pitching/series", label="gw 50_9", measure="club_speed")["sessions"] == []     # not on the card
 
 
 def test_straightness_and_ladder(state):
@@ -344,10 +362,10 @@ def test_the_card_uses_every_shot_of_the_selected_sessions(state):
 def test_swing_and_pitching_selections_are_independent(state):
     call(state, "/api/sessions", method="POST", mode="swing", selected=session_dates(state)[:1])
     assert len(call(state, "/api/pitching/overview")["sessions"]) == 6
-    assert len(call(state, "/api/pitching/accuracy", club="gw 50", measure="speed_sd")["sessions"]) == 6
+    assert len(call(state, "/api/pitching/series", label="gw 50", measure="club_speed")["dates"]) == 6
     call(state, "/api/sessions", method="POST", mode="pitching", selected=session_dates(state, "pitching")[:2])
     assert len(call(state, "/api/pitching/overview")["sessions"]) == 2
-    assert len(call(state, "/api/pitching/accuracy", club="gw 50", measure="speed_sd")["sessions"]) == 2
+    assert len(call(state, "/api/pitching/series", label="gw 50", measure="club_speed")["dates"]) == 2
     assert len(call(state, "/api/swing/overview")["sessions"]) == 1
     info = call(state, "/api/state")["datasets"]
     assert info["swing"]["sessions_selected"] == 1 and info["pitching"]["sessions_selected"] == 2

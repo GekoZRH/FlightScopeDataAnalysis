@@ -151,18 +151,20 @@
 
     <div class="card">
       <div class="row between">
-        <h2>Accuracy over time, by intent</h2>
+        <h2>Progress</h2>
         <div class="controls">
           <label>Wedge <select id="pt-club"></select></label>
-          <label>Measure <select id="pt-measure">
-            <option value="speed_sd">Club head speed spread (sd)</option>
-            <option value="speed_mean">Club head speed (mean)</option>
-            <option value="lateral_sd">Lateral spread (sd)</option>
-            <option value="carry_sd">Carry spread (sd, simulated)</option></select></label>
+          <label>Intent <select id="pt-intent"></select></label>
         </div>
       </div>
-      <div id="pt-accuracy" class="plot"></div>
-      <p class="muted small">Falling lines in the spread charts mean you are getting more consistent. Hover a point for the shot count and 95% interval.</p>
+      <div id="pt-progress-1" class="plot short"></div>
+      <div id="pt-progress-2" class="plot short"></div>
+      <div class="row between" style="margin-top:8px;margin-bottom:2px">
+        <span class="muted small">Any other measure per session (mean with 95% interval; spreads are standard deviations)</span>
+        <div class="controls"><label>Parameter <select id="pt-metric"></select></label></div>
+      </div>
+      <div id="pt-progress-3" class="plot short"></div>
+      <p class="muted small">Carry is simulated indoors. Falling spread lines mean you are getting more consistent. Hover a point for the shot count and 95% interval.</p>
     </div>
 
     <div class="card">

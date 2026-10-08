@@ -17,7 +17,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from golf.bag import available_clubs, intent_grid, select_bag, unlisted_clubs
+from golf.bag import available_clubs, club_variant, intent_grid, select_bag, unlisted_clubs
 from golf.config import MODES, BagSpec, Config, load_config, update_local_settings
 from golf.data import load_shots, unparsed_labels
 from golf.data.labels import FULL_SWING
@@ -276,6 +276,7 @@ SERIES = {
     "height": ("height_m", "mean", "Peak height (m)", "Ball flight"),
     "flight_time": ("flight_time_s", "mean", "Flight time (s)", "Ball flight"),
     "spin_axis": ("spin_axis_deg", "mean", "Spin axis (deg, negative = left)", "Ball flight"),
+    "club_speed_sd": ("club_speed_mph", "sd", "Club head speed spread, sd (mph)", "Club"),
     "aoa": ("aoa_deg", "mean", "Angle of attack (deg)", "Club"),
     "club_path": ("club_path_deg", "mean", "Club path (deg, negative = left)", "Club"),
     "dynamic_loft": ("dynamic_loft_deg", "mean", "Dynamic loft (deg)", "Club"),
@@ -297,6 +298,8 @@ def series(state: AppState, mode: str, label: str, measure: str) -> Dict:
     if measure not in SERIES:
         raise ValueError(f"Unknown measure: {measure}")
     column, kind, title, _ = SERIES[measure]
+    if mode == "pitching" and column == "carry_m":
+        title = title.replace("(m)", "(m, simulated)")      # indoor carry is only a simulation
     df = state.selected(mode)
     included = state.included(mode)
     dates = sorted({str(d) for d in included["session_date"]}) if included is not None else []
@@ -378,10 +381,15 @@ def dispersion(state: AppState, mode: str, label: str, session: str, compare: st
 def pitching_overview(state: AppState) -> Dict:
     df = state.selected("pitching")
     labels = list(dict.fromkeys(df["label"])) if not df.empty else []
-    clubs = list(dict.fromkeys(df["club"] + " " + df["variant"].fillna(""))) if not df.empty else []
+    choices = []
+    if not df.empty:
+        base = club_variant(df)
+        for club in dict.fromkeys(base):
+            intents = sorted(df[base == club]["intent"].unique(), reverse=True)
+            choices.append({"club": club, "intents": [int(i) for i in intents]})
     return clean({
-        "sessions": sessions_of(df), "labels": labels, "clubs": [c.strip() for c in clubs],
-        "loaded": state.shots["pitching"] is not None,
+        "sessions": sessions_of(df), "labels": labels, "choices": choices,
+        "loaded": state.shots["pitching"] is not None, "measures": series_menu(),
     })
 
 
@@ -390,40 +398,6 @@ def pitching_review(state: AppState, session: str, baseline: str = "last4") -> D
         state, "pitching", session, baseline,
         {"speed": "club_speed_mph", "carry": "carry_m", "lateral": "lateral_m"}, key="speed",
     )
-
-
-ACCURACY_MEASURES = {
-    "speed_mean": ("club_speed_mph", "mean", "Club head speed (mph)"),
-    "speed_sd": ("club_speed_mph", "sd", "Club head speed spread, sd (mph)"),
-    "lateral_sd": ("lateral_m", "sd", "Lateral spread, sd (m)"),
-    "carry_sd": ("carry_m", "sd", "Carry spread, sd (m, simulated)"),
-}
-
-
-def accuracy_over_time(state: AppState, club: str, measure: str) -> Dict:
-    """For one wedge: the chosen measure per session, one series per intent."""
-    column, kind, title = ACCURACY_MEASURES[measure]
-    shots = state.included("pitching")
-    if shots is None:
-        return {"title": title, "sessions": [], "series": []}
-    base = (shots["club"].fillna("") + " " + shots["variant"].fillna("")).str.strip()
-    group = shots[base == club]
-    level = state.config.stats.ci_level
-    sessions = sessions_of(group)[::-1]
-    series = []
-    for intent in sorted(group["intent"].dropna().unique(), reverse=True):
-        frame = group[group["intent"] == intent]
-        summary = session_summary(frame, column, by=["label"], level=level)
-        points = {str(r["session_date"]): r for _, r in summary.iterrows()}
-        name = "full" if int(intent) == FULL_SWING else str(int(intent))
-        series.append({
-            "intent": int(intent), "name": name,
-            "y": [points[d][kind] if d in points else None for d in sessions],
-            "lo": [points[d][f"{kind}_lo"] if d in points else None for d in sessions],
-            "hi": [points[d][f"{kind}_hi"] if d in points else None for d in sessions],
-            "n": [int(points[d]["n"]) if d in points else 0 for d in sessions],
-        })
-    return clean({"title": title, "sessions": sessions, "series": series})
 
 
 def _selection_shots(state: AppState, mode: str) -> pd.DataFrame:

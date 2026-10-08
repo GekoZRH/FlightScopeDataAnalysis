@@ -2,7 +2,6 @@
 
 const $ = (id) => document.getElementById(id);
 const INTENTS = [12, 11, 10, 9];
-const INTENT_COLORS = { full: "#378ADD", "11": "#1D9E75", "10": "#BA7517", "9": "#D4537E" };
 let currentTab = "swing";
 
 // ---------------------------------------------------------------- helpers
@@ -94,7 +93,7 @@ function sessionChart(id, dates, series, { title, band = false, height }) {
       traces.push({
         x: keep.map((i) => dates[i]).concat(keep.map((i) => dates[i]).reverse()),
         y: keep.map((i) => s.hi[i]).concat(keep.map((i) => s.lo[i]).reverse()),
-        fill: "toself", fillcolor: rgba(s.color, 0.16), line: { width: 0 }, hoverinfo: "skip", showlegend: false,
+        mode: "lines", fill: "toself", fillcolor: rgba(s.color, 0.16), line: { width: 0 }, hoverinfo: "skip", showlegend: false,
       });
     }
     traces.push({
@@ -158,12 +157,11 @@ async function loadSwing() {
   fillSelect($("sw-disp-session"), o.sessions, o.sessions.map(dateLabel));
   fillSelect($("sw-club"), o.labels);
   fillSelect($("sw-disp-club"), o.labels);
-  fillMeasureMenu(o.measures);
+  fillMeasureMenu($("sw-metric"), o.measures);
   await Promise.all([swingReview(), swingProgress(), swingDispersion()]);
 }
 
-function fillMeasureMenu(measures) {
-  const select = $("sw-metric");
+function fillMeasureMenu(select, measures) {
   const previous = select.value;
   const groups = [...new Set(measures.map((m) => m.group))];
   select.innerHTML = groups.map((g) =>
@@ -188,11 +186,11 @@ async function swingReview() {
     (rows || '<tr><td colspan="8" class="muted">No shots for the selected clubs in this session.</td></tr>');
 }
 
-async function swingSeries(measure, id, color) {
-  const label = $("sw-club").value;
-  const d = await api("/api/swing/series", { params: { label, measure } });
+// One measure per session for one club, for the swing or the pitching tab.
+async function progressChart(path, label, measure, id, color) {
+  const d = await api(path, { params: { label, measure } });
   if (!d.sessions.length) {
-    draw(id, [], baseLayout({ annotations: [{ text: "No data for this club", showarrow: false, font: { color: css("--muted") } }], xaxis: { visible: false }, yaxis: { visible: false } }));
+    draw(id, [], baseLayout({ annotations: [{ text: "No data for this selection", showarrow: false, font: { color: css("--muted") } }], xaxis: { visible: false }, yaxis: { visible: false } }));
     return;
   }
   // every selected session is on the axis; sessions without this club have no point and the line bridges them
@@ -204,11 +202,12 @@ async function swingSeries(measure, id, color) {
 }
 
 async function swingProgress() {
-  if (!$("sw-club").value) return;
+  const label = $("sw-club").value;
+  if (!label) return;
   await Promise.all([
-    swingSeries("carry_mean", "sw-progress-1", "#378ADD"),
-    swingSeries("club_speed", "sw-progress-2", "#D4537E"),
-    swingSeries($("sw-metric").value, "sw-progress-3", "#1D9E75"),
+    progressChart("/api/swing/series", label, "carry_mean", "sw-progress-1", "#378ADD"),
+    progressChart("/api/swing/series", label, "club_speed", "sw-progress-2", "#D4537E"),
+    progressChart("/api/swing/series", label, $("sw-metric").value, "sw-progress-3", "#1D9E75"),
   ]);
 }
 
@@ -257,8 +256,11 @@ async function swingDispersion() {
 async function loadPitching() {
   const o = await api("/api/pitching/overview");
   fillSelect($("pt-session"), o.sessions, o.sessions.map(dateLabel));
-  fillSelect($("pt-club"), o.clubs);
-  await Promise.all([pitchingReview(), pitchingAccuracy(), pitchingStraightness(), pitchingLadder()]);
+  pitchingChoices = o.choices;
+  fillSelect($("pt-club"), o.choices.map((c) => c.club));
+  fillIntents();
+  fillMeasureMenu($("pt-metric"), o.measures);
+  await Promise.all([pitchingReview(), pitchingProgress(), pitchingStraightness(), pitchingLadder()]);
 }
 
 async function pitchingReview() {
@@ -281,12 +283,23 @@ async function pitchingReview() {
     (rows || '<tr><td colspan="11" class="muted">No shots for the selected wedges in this session.</td></tr>');
 }
 
-async function pitchingAccuracy() {
-  const club = $("pt-club").value;
-  if (!club) return;
-  const d = await api("/api/pitching/accuracy", { params: { club, measure: $("pt-measure").value } });
-  const series = d.series.map((s) => ({ name: s.name, color: INTENT_COLORS[s.name], y: s.y, lo: s.lo, hi: s.hi, n: s.n }));
-  sessionChart("pt-accuracy", d.sessions, series, { title: d.title, height: 320 });
+let pitchingChoices = [];
+
+function fillIntents() {
+  const choice = pitchingChoices.find((c) => c.club === $("pt-club").value);
+  const intents = choice ? choice.intents : [];
+  fillSelect($("pt-intent"), intents.map(String), intents.map(intentName));
+}
+
+async function pitchingProgress() {
+  const club = $("pt-club").value, intent = Number($("pt-intent").value);
+  if (!club || !intent) return;
+  const label = intent === 12 ? club : `${club}_${intent}`;
+  await Promise.all([
+    progressChart("/api/pitching/series", label, "carry_mean", "pt-progress-1", "#378ADD"),
+    progressChart("/api/pitching/series", label, "club_speed", "pt-progress-2", "#D4537E"),
+    progressChart("/api/pitching/series", label, $("pt-metric").value, "pt-progress-3", "#1D9E75"),
+  ]);
 }
 
 async function pitchingStraightness() {
@@ -490,7 +503,8 @@ function wire() {
   $("sw-card").addEventListener("click", guard(() => makeCard("swing", "sw")));
 
   for (const id of ["pt-session", "pt-baseline"]) $(id).addEventListener("change", guard(pitchingReview));
-  for (const id of ["pt-club", "pt-measure"]) $(id).addEventListener("change", guard(pitchingAccuracy));
+  $("pt-club").addEventListener("change", guard(async () => { fillIntents(); await pitchingProgress(); }));
+  for (const id of ["pt-intent", "pt-metric"]) $(id).addEventListener("change", guard(pitchingProgress));
   $("pt-sort").addEventListener("change", guard(pitchingStraightness));
   let timer;
   for (const id of ["pt-target", "pt-tol"]) $(id).addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(guard(pitchingLadder), 300); });
