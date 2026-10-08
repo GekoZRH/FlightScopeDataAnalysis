@@ -1,0 +1,507 @@
+import json
+import re
+import threading
+import urllib.error
+import urllib.request
+from datetime import date, timedelta
+
+import numpy as np
+import pytest
+
+from golf.config import DEFAULT_CONFIG, load_config
+from golf.dashboard import api, service
+from golf.dashboard.server import create_server
+from golf.dashboard.service import AppState
+
+HEADER = "Index,Player,Time,Carry [m],Roll [m],Lateral [m],Club Speed [mph],Club,Shot Type"
+
+
+def write_session(folder, day, rows):
+    lines = [HEADER]
+    for i, (club, carry, lateral, speed) in enumerate(rows, start=1):
+        lateral_text = f"{abs(lateral):.1f} {'R' if lateral >= 0 else 'L'}"
+        lines.append(f"{i},Me,{day:%Y-%m-%d}; 10-{i // 60:02d}-{i % 60:02d},{carry:.1f},1.0,{lateral_text},{speed:.1f},{club},Straight")
+    (folder / f"Lesson - {day:%d%m%Y} 100000_windows-1252.csv").write_text("\n".join(lines) + "\n", encoding="windows-1252")
+
+
+@pytest.fixture
+def state(tmp_path):
+    rng = np.random.default_rng(3)
+    swing, pitching = tmp_path / "swing", tmp_path / "pitching"
+    swing.mkdir(), pitching.mkdir()
+    start = date(2026, 3, 1)
+    for k in range(6):
+        day = start + timedelta(days=7 * k)
+        rows = [("Driver Ping", 210 + rng.normal(0, 8), rng.normal(5, 6), 100 + rng.normal(0, 2)) for _ in range(12)]
+        rows += [("7 Iron 245", 160 + rng.normal(0, 5 - 0.5 * k), rng.normal(-2, 4), 85 + rng.normal(0, 2)) for _ in range(10)]
+        rows += [("Gap Wedge", 90 + rng.normal(0, 4), rng.normal(0, 3), 78 + rng.normal(0, 2)) for _ in range(4)]
+        write_session(swing, day, rows)
+        wedge = []
+        for label, base_carry, base_speed in (("GW 50", 92, 78), ("GW 50_11", 82, 73), ("GW 50_10", 68, 63), ("GW 50_9", 50, 52)):
+            wedge += [(label, base_carry + rng.normal(0, 4), rng.normal(-1, 2), base_speed + rng.normal(0, 3 - 0.2 * k)) for _ in range(8)]
+        write_session(pitching, day, wedge)
+
+    text = DEFAULT_CONFIG.read_text(encoding="utf-8")
+    text = re.sub(r'swing_dir = ".*"', 'swing_dir = "swing"', text)
+    text = re.sub(r'pitching_dir = ".*"', 'pitching_dir = "pitching"', text)
+    text = re.sub(r'output_dir = ".*"', 'output_dir = "out"', text)
+    config_path = tmp_path / "golf.toml"
+    config_path.write_text(text, encoding="utf-8")
+    return AppState(config_path)
+
+
+def call(state, path, method="GET", **params):
+    body = params if method == "POST" else {}
+    query = {} if method == "POST" else {k: str(v) for k, v in params.items()}
+    return api.handle(state, method, path, query, body)
+
+
+# --- data ----------------------------------------------------------------------------
+
+def test_dataset_info_counts_files_and_shots(state):
+    info = call(state, "/api/state")["datasets"]
+    assert info["swing"]["loaded"] and info["swing"]["files"] == 6 and info["swing"]["shots"] == 156
+    assert info["pitching"]["shots"] == 6 * 32 and info["swing"]["unreadable"] == []
+
+
+def test_a_missing_folder_is_reported_not_raised(tmp_path):
+    text = DEFAULT_CONFIG.read_text(encoding="utf-8")
+    text = re.sub(r'swing_dir = ".*"', 'swing_dir = "nowhere"', text)
+    (tmp_path / "golf.toml").write_text(text, encoding="utf-8")
+    broken = AppState(tmp_path / "golf.toml")
+    assert not call(broken, "/api/state")["datasets"]["swing"]["loaded"]
+    assert call(broken, "/api/swing/review", session="2026-03-01")["rows"] == []
+    with pytest.raises(api.ApiError):
+        call(broken, "/api/swing/dispersion", label="7i 245", session="2026-03-01")
+
+
+def test_choosing_folders_is_validated_and_remembered(state, tmp_path):
+    other = tmp_path / "other"
+    other.mkdir()
+    with pytest.raises(api.ApiError, match="No CSV files"):
+        call(state, "/api/load", method="POST", swing_dir=str(other))
+    with pytest.raises(api.ApiError, match="not a folder"):
+        call(state, "/api/load", method="POST", swing_dir=str(tmp_path / "missing"))
+    (other / "x.csv").write_text(HEADER + "\n1,Me,2026-04-01; 10-00-01,100,1,1.0 R,80,7 Iron 245,Fade\n", encoding="windows-1252")
+    info = call(state, "/api/load", method="POST", swing_dir=str(other))["datasets"]
+    assert info["swing"]["shots"] == 1
+    assert json.loads(state.config.local_path.read_text())["swing_dir"] == str(other)
+
+
+# --- full swing -------------------------------------------------------------------------
+
+def test_swing_review_compares_with_earlier_sessions(state):
+    overview = call(state, "/api/swing/overview")
+    assert overview["sessions"][0] == "2026-04-05" and overview["labels"][0] == "driver ping"
+    review = call(state, "/api/swing/review", session="2026-04-05")
+    rows = {r["label"]: r for r in review["rows"]}
+    assert set(rows) == {"driver ping", "7i 245", "gw 50"}      # 'Gap Wedge' is aliased to gw 50
+    driver = rows["driver ping"]
+    assert driver["n"] == 12 and driver["n_before"] == 48       # the 4 sessions before
+    assert driver["measures"]["carry"]["d_mean"]["lo"] < driver["measures"]["carry"]["d_mean"]["hi"]
+    assert rows["gw 50"]["verdict"] is None                       # only 4 shots in the session
+    all_before = call(state, "/api/swing/review", session="2026-04-05", baseline="all")
+    assert {r["label"]: r for r in all_before["rows"]}["driver ping"]["n_before"] == 60
+
+
+def test_first_session_has_nothing_to_compare_with(state):
+    row = call(state, "/api/swing/review", session="2026-03-01")["rows"][0]
+    assert row["n_before"] == 0 and row["verdict"] is None
+
+
+def test_series_has_one_point_per_session(state):
+    d = call(state, "/api/swing/series", label="7i 245", measure="carry_sd")
+    assert d["title"].startswith("Carry spread") and [s["date"] for s in d["sessions"]][0] == "2026-03-01"
+    assert len(d["sessions"]) == 6 and all(s["lo"] < s["y"] < s["hi"] for s in d["sessions"])
+
+
+def test_series_fixed_charts_and_menu(state):
+    carry = call(state, "/api/swing/series", label="driver ping", measure="carry_mean")
+    speed = call(state, "/api/swing/series", label="driver ping", measure="club_speed")
+    assert carry["title"] == "Mean carry (m)" and speed["title"] == "Club head speed (mph)"
+    assert all(200 < p["y"] < 220 for p in carry["sessions"]) and all(95 < p["y"] < 105 for p in speed["sessions"])
+    menu = call(state, "/api/swing/overview")["measures"]
+    keys = [m["key"] for m in menu]
+    assert "carry_mean" not in keys and "club_speed" not in keys           # already shown as fixed charts
+    assert {"carry_sd", "lat_sd", "ball_speed", "spin", "descent", "height", "smash"} <= set(keys)
+    assert {m["group"] for m in menu} == {"Distribution", "Ball flight", "Club"}
+
+
+def test_series_for_a_measure_the_data_lacks_is_empty(state):
+    d = call(state, "/api/swing/series", label="driver ping", measure="spin")    # test files have no spin column
+    assert d["sessions"] == []
+
+
+def test_series_rejects_unknown_measures(state):
+    with pytest.raises(api.ApiError, match="Unknown measure"):
+        call(state, "/api/swing/series", label="driver ping", measure="not_a_measure")
+
+
+def test_review_reports_the_historic_shots_next_to_the_session(state):
+    rows = {r["label"]: r for r in call(state, "/api/swing/review", session="2026-04-05")["rows"]}
+    driver = rows["driver ping"]["measures"]
+    assert driver["carry"]["n"] == 12 and driver["carry"]["before"]["n"] == 48
+    assert driver["carry"]["before"]["mean"] == pytest.approx(210, abs=5)
+    assert driver["lateral"]["before"]["sd"] > 0
+    first = {r["label"]: r for r in call(state, "/api/swing/review", session="2026-03-01")["rows"]}
+    assert first["driver ping"]["measures"]["carry"]["before"]["n"] == 0
+
+
+@pytest.mark.parametrize("compare", ["last4", "all", "window"])
+def test_dispersion_returns_points_rings_and_a_verdict(state, compare):
+    d = call(state, "/api/swing/dispersion", label="driver ping", session="2026-04-05", compare=compare)
+    assert len(d["now"]["carry"]) == 12 and len(d["before"]["carry"]) > 12
+    assert len(d["rings"]["now"]["68"]) > 20 and len(d["rings"]["before"]["95"]) > 20
+    assert d["verdict"]["carry"] in (-1, 0, 1)
+    assert d["sessions"] and all(len(s["ring"]) > 10 for s in d["sessions"])
+
+
+def test_the_95_ring_is_larger_than_the_68_ring(state):
+    ring = call(state, "/api/swing/dispersion", label="driver ping", session="2026-04-05")["rings"]["now"]
+    width = lambda points: max(p[0] for p in points) - min(p[0] for p in points)
+    assert width(ring["95"]) > width(ring["68"])
+
+
+# --- bag and wedge selection -------------------------------------------------------------
+
+def test_bag_choice_is_saved_and_used(state):
+    bag = call(state, "/api/bag")
+    assert [c["club"] for c in bag["clubs"]] == ["driver ping", "7i 245", "gw 50"]
+    assert all(c["selected"] for c in bag["clubs"])
+    saved = call(state, "/api/bag", method="POST", clubs=["7i 245", "driver ping"])
+    assert [c["club"] for c in saved["clubs"] if c["selected"]] == ["driver ping", "7i 245"]   # standard order
+    assert call(state, "/api/swing/overview")["labels"] == ["driver ping", "7i 245"]
+    assert load_config(state.config_path).bag["swing"].clubs == ("driver ping", "7i 245")
+
+
+def test_bag_choice_is_checked(state):
+    with pytest.raises(api.ApiError, match="Not found"):
+        call(state, "/api/bag", method="POST", clubs=["driver ping", "putter"])
+    with pytest.raises(api.ApiError, match="at least one"):
+        call(state, "/api/bag", method="POST", clubs=[])
+
+
+def test_wedge_grid_and_selection(state):
+    grid = call(state, "/api/wedges")["rows"]
+    assert grid[0]["club"] == "gw 50" and grid[0]["counts"] == {"12": 48, "11": 48, "10": 48, "9": 48}
+    call(state, "/api/wedges", method="POST", pairs=[["gw 50", 12], ["gw 50", 10]])
+    assert call(state, "/api/wedges")["rows"][0]["selected"] == [12, 10]
+    labels = call(state, "/api/pitching/overview")["labels"]
+    assert labels == ["gw 50", "gw 50_10"]
+    with pytest.raises(api.ApiError, match="No shots recorded"):
+        call(state, "/api/wedges", method="POST", pairs=[["lw 58", 12]])
+
+
+# --- pitching ------------------------------------------------------------------------------
+
+def test_pitching_review_has_speed_carry_and_lateral(state):
+    review = call(state, "/api/pitching/review", session="2026-04-05")
+    row = {r["label"]: r for r in review["rows"]}["gw 50_10"]
+    assert set(row["measures"]) == {"speed", "carry", "lateral"}
+    assert row["measures"]["speed"]["mean"] == pytest.approx(63, abs=4)
+    assert row["verdict"] in (-1, 0, 1)                           # 8 shots against 32 before
+
+
+def test_pitching_overview_offers_wedge_and_intent_choices(state):
+    overview = call(state, "/api/pitching/overview")
+    assert overview["choices"] == [{"club": "gw 50", "intents": [12, 11, 10, 9]}]
+    assert {"club_speed_sd", "lat_sd", "carry_sd"} <= {m["key"] for m in overview["measures"]}
+
+
+def test_pitching_progress_is_per_wedge_and_intent(state):
+    full = call(state, "/api/pitching/series", label="gw 50", measure="club_speed")
+    nine = call(state, "/api/pitching/series", label="gw 50_9", measure="club_speed")
+    assert full["title"] == "Club head speed (mph)" and len(full["dates"]) == 6 and len(full["sessions"]) == 6
+    assert all(70 < p["y"] < 86 for p in full["sessions"]) and all(44 < p["y"] < 60 for p in nine["sessions"])
+    spread = call(state, "/api/pitching/series", label="gw 50_10", measure="club_speed_sd")
+    assert spread["title"] == "Club head speed spread, sd (mph)" and all(p["lo"] < p["y"] < p["hi"] for p in spread["sessions"])
+    carry = call(state, "/api/pitching/series", label="gw 50_11", measure="carry_sd")
+    assert carry["title"] == "Carry spread, sd (m, simulated)"
+    assert call(state, "/api/pitching/series", label="gw 50_11", measure="lat_sd")["title"].startswith("Lateral spread")
+
+
+def test_pitching_progress_uses_the_selected_sessions_and_intents(state):
+    call(state, "/api/sessions", method="POST", mode="pitching", selected=session_dates(state, "pitching")[:2])
+    assert len(call(state, "/api/pitching/series", label="gw 50", measure="club_speed")["dates"]) == 2
+    call(state, "/api/wedges", method="POST", pairs=[["gw 50", 12]])
+    assert call(state, "/api/pitching/series", label="gw 50_9", measure="club_speed")["sessions"] == []     # not on the card
+
+
+def test_straightness_and_ladder(state):
+    rows = call(state, "/api/pitching/straightness")["rows"]
+    assert len(rows) == 4 and all(r["lo95"] < r["lo68"] < r["mean"] < r["hi68"] < r["hi95"] for r in rows)
+    ladder = call(state, "/api/pitching/ladder", target=82, tolerance=3)["rows"]
+    assert ladder[0]["label"] == "gw 50_11" and ladder[0]["chance"] > ladder[-1]["chance"]
+
+
+# --- cards ------------------------------------------------------------------------------------
+
+def test_cards_are_written_to_a_folder_per_data_set(state):
+    from pathlib import Path
+
+    swing = call(state, "/api/card", method="POST", mode="swing")
+    pitching = call(state, "/api/card", method="POST", mode="pitching")
+    assert swing["rows"] == 3 and pitching["rows"] == 4 and swing["as_of"] == "2026-04-05"
+    assert Path(swing["file"]).parent == state.config.cards_dir("swing")
+    assert Path(pitching["file"]).parent == state.config.cards_dir("pitching")
+    assert state.config.cards_dir("swing") != state.config.cards_dir("pitching")
+    assert swing["url"].startswith("/files/cards/") and pitching["url"].endswith("wedge_distance_card.png")
+    folder = state.config.cards_dir("swing")
+    assert (folder / "swing_distance_card.png").stat().st_size > 10_000
+    assert (folder / "archive" / "2026-04-05_swing_distance_card.png").exists()
+
+
+def test_a_generated_card_can_be_fetched_through_the_server(state):
+    from golf.dashboard.server import create_server, make_handler
+
+    result = call(state, "/api/card", method="POST", mode="swing")
+    httpd = create_server(state, port=0)
+    port = httpd.server_address[1]
+    httpd.RequestHandlerClass = make_handler(state, port)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        status, body = fetch(port, result["url"])
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+    assert status == 200 and body[1:4] == b"PNG"
+
+
+def test_card_follows_the_bag_choice(state):
+    call(state, "/api/bag", method="POST", clubs=["driver ping"])
+    assert call(state, "/api/card", method="POST", mode="swing")["rows"] == 1
+
+
+# --- web server ----------------------------------------------------------------------------------
+
+@pytest.fixture
+def server(state):
+    httpd = create_server(state, port=0)
+    port = httpd.server_address[1]
+    # the handler was built for the requested port 0; rebuild it for the real one
+    from golf.dashboard.server import make_handler
+    httpd.RequestHandlerClass = make_handler(state, port)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    yield port
+    httpd.shutdown()
+    httpd.server_close()
+
+
+def fetch(port, path, method="GET", data=None, headers=None):
+    request = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=data, method=method, headers=headers or {})
+    try:
+        with urllib.request.urlopen(request) as response:
+            return response.status, response.read()
+    except urllib.error.HTTPError as error:
+        return error.code, error.read()
+
+
+def test_server_serves_page_script_and_data(server):
+    status, page = fetch(server, "/")
+    assert status == 200 and b"Golf practice dashboard" in page
+    assert fetch(server, "/app.js")[0] == 200 and fetch(server, "/app.css")[0] == 200
+    status, js = fetch(server, "/plotly.js")
+    assert status == 200 and len(js) > 1_000_000
+    status, body = fetch(server, "/api/swing/overview")
+    assert status == 200 and json.loads(body)["labels"][0] == "driver ping"
+
+
+def test_server_rejects_foreign_hosts_and_posts_without_the_header(server):
+    assert fetch(server, "/api/state", headers={"Host": "evil.example"})[0] == 403
+    assert fetch(server, "/api/bag", method="POST", data=b'{"clubs": ["driver ping"]}')[0] == 403
+    status, _ = fetch(server, "/api/bag", method="POST", data=b'{"clubs": ["driver ping"]}', headers={"X-Golf": "1"})
+    assert status == 200
+
+
+def test_server_reports_user_errors_as_400_and_hides_other_files(server):
+    status, body = fetch(server, "/api/bag", method="POST", data=b'{"clubs": []}', headers={"X-Golf": "1"})
+    assert status == 400 and "at least one" in json.loads(body)["error"]
+    assert fetch(server, "/api/nothing")[0] == 404
+    assert fetch(server, "/files/../golf.toml")[0] == 404
+    assert fetch(server, "/files/cards/missing.png")[0] == 404
+    assert fetch(server, "/..%2fgolf.toml")[0] == 404
+
+
+# --- sessions ------------------------------------------------------------------------------------
+
+def session_dates(state, mode="swing"):
+    return [s["date"] for s in call(state, "/api/sessions", mode=mode)["sessions"]]
+
+
+def test_sessions_are_listed_newest_first_and_all_take_part(state):
+    listing = call(state, "/api/sessions", mode="swing")
+    assert [s["date"] for s in listing["sessions"]][:2] == ["2026-04-05", "2026-03-29"]
+    assert all(s["selected"] for s in listing["sessions"]) and listing["sessions"][0]["shots"] == 26
+    assert listing["window_weeks"] == 4 and listing["fallback_weeks"] == 12
+
+
+def test_only_the_selected_sessions_are_analysed(state):
+    chosen = session_dates(state)[:3]                       # the three newest
+    listing = call(state, "/api/sessions", method="POST", mode="swing", selected=chosen)
+    assert [s["date"] for s in listing["sessions"] if s["selected"]] == chosen
+
+    assert call(state, "/api/swing/overview")["sessions"] == chosen
+    assert [s["date"] for s in call(state, "/api/swing/series", label="driver ping", measure="carry_mean")["sessions"]] == chosen[::-1]
+    newest = {r["label"]: r for r in call(state, "/api/swing/review", session=chosen[0], baseline="selected")["rows"]}
+    assert newest["driver ping"]["n_before"] == 24           # the two other selected sessions of 12 shots
+    card = call(state, "/api/card", method="POST", mode="swing")
+    assert card["sessions"] == 3 and card["from"] == chosen[-1] and card["as_of"] == chosen[0]
+
+
+def test_the_card_uses_every_shot_of_the_selected_sessions(state):
+    from golf.report.build import generate_card
+
+    chosen = session_dates(state)[:2]
+    call(state, "/api/sessions", method="POST", mode="swing", selected=chosen)
+    _, card = generate_card("swing", state.included("swing"), state.config)
+    assert dict(zip(card["label"], card["n"])) == {"driver ping": 24, "7i 245": 20, "gw 50": 8}
+    assert dict(zip(card["label"], card["status"])) == {"driver ping": "ok", "7i 245": "ok", "gw 50": "short"}
+
+
+def test_swing_and_pitching_selections_are_independent(state):
+    call(state, "/api/sessions", method="POST", mode="swing", selected=session_dates(state)[:1])
+    assert len(call(state, "/api/pitching/overview")["sessions"]) == 6
+    assert len(call(state, "/api/pitching/series", label="gw 50", measure="club_speed")["dates"]) == 6
+    call(state, "/api/sessions", method="POST", mode="pitching", selected=session_dates(state, "pitching")[:2])
+    assert len(call(state, "/api/pitching/overview")["sessions"]) == 2
+    assert len(call(state, "/api/pitching/series", label="gw 50", measure="club_speed")["dates"]) == 2
+    assert len(call(state, "/api/swing/overview")["sessions"]) == 1
+    info = call(state, "/api/state")["datasets"]
+    assert info["swing"]["sessions_selected"] == 1 and info["pitching"]["sessions_selected"] == 2
+
+
+def test_sessions_added_later_take_part_and_other_folders_start_complete(state, tmp_path):
+    call(state, "/api/sessions", method="POST", mode="swing", selected=session_dates(state)[:3])
+    write_session(tmp_path / "swing", date(2026, 5, 1), [("Driver Ping", 210.0 + i, 1.0, 100.0) for i in range(12)])
+    call(state, "/api/load", method="POST", swing_dir=str(tmp_path / "swing"))
+    listing = call(state, "/api/sessions", mode="swing")["sessions"]
+    assert listing[0]["date"] == "2026-05-01" and listing[0]["selected"]
+    assert sum(s["selected"] for s in listing) == 4
+
+    other = tmp_path / "other"
+    other.mkdir()
+    write_session(other, date(2026, 6, 1), [("Driver Ping", 200.0 + i, 1.0, 100.0) for i in range(6)])
+    call(state, "/api/load", method="POST", swing_dir=str(other))
+    assert [s["selected"] for s in call(state, "/api/sessions", mode="swing")["sessions"]] == [True]
+
+
+def test_the_session_selection_is_checked(state):
+    with pytest.raises(api.ApiError, match="at least one"):
+        call(state, "/api/sessions", method="POST", mode="swing", selected=[])
+    with pytest.raises(api.ApiError, match="Not a session"):
+        call(state, "/api/sessions", method="POST", mode="swing", selected=["1999-01-01"])
+    assert call(state, "/api/sessions", mode="swing")["sessions"][0]["selected"]
+
+
+def test_the_command_line_card_uses_the_saved_selection(state, tmp_path):
+    from golf.cli import build_cards
+
+    chosen = session_dates(state)[:2]
+    call(state, "/api/sessions", method="POST", mode="swing", selected=chosen)
+    build_cards(config_path=state.config_path)
+    import matplotlib.image as image
+    assert image.imread(state.config.cards_dir("swing") / "swing_distance_card.png").shape[0] == 4050
+    assert (state.config.cards_dir("swing") / "archive" / f"{chosen[0]}_swing_distance_card.png").exists()
+
+
+def test_review_can_compare_with_all_other_selected_sessions(state):
+    review = lambda baseline, session="2026-04-05": {
+        r["label"]: r for r in call(state, "/api/swing/review", session=session, baseline=baseline)["rows"]}
+    driver = review("selected")["driver ping"]["measures"]["carry"]
+    assert driver["before"]["n"] == 60                          # the 5 other sessions of 12 shots; this one is left out
+    pool = state.selected("swing")
+    pool = pool[(pool["label"] == "driver ping") & (pool["session_date"] != date(2026, 4, 5))]["carry_m"]
+    assert driver["before"]["mean"] == pytest.approx(pool.mean(), abs=1e-3)
+    assert driver["before"]["sd"] == pytest.approx(pool.std(ddof=1), abs=1e-3)
+    # earlier AND later selected sessions count, so the first session is compared with all the others
+    assert review("selected", "2026-03-01")["driver ping"]["measures"]["carry"]["before"]["n"] == 60
+    assert review("all", "2026-03-01")["driver ping"]["measures"]["carry"]["before"]["n"] == 0
+
+
+def test_all_selected_sessions_follows_the_session_selection(state):
+    call(state, "/api/sessions", method="POST", mode="swing", selected=session_dates(state)[:3])
+    row = {r["label"]: r for r in call(state, "/api/swing/review", session=session_dates(state)[0], baseline="selected")["rows"]}
+    assert row["driver ping"]["measures"]["carry"]["before"]["n"] == 24
+    pitching = call(state, "/api/pitching/review", session="2026-04-05", baseline="selected")["rows"]
+    assert {r["label"]: r for r in pitching}["gw 50"]["n_before"] == 40            # 5 other sessions of 8 shots
+
+
+def test_progress_axis_has_every_selected_session(state, tmp_path):
+    write_session(tmp_path / "swing", date(2026, 4, 12), [("Driver Ping", 205.0 + i, 1.0, 99.0) for i in range(12)])   # no 7-iron
+    call(state, "/api/load", method="POST", swing_dir=str(tmp_path / "swing"))
+    iron = call(state, "/api/swing/series", label="7i 245", measure="carry_mean")
+    driver = call(state, "/api/swing/series", label="driver ping", measure="carry_mean")
+    assert len(iron["dates"]) == 7 and iron["dates"] == driver["dates"] == sorted(iron["dates"])
+    assert "2026-04-12" in iron["dates"] and "2026-04-12" not in [s["date"] for s in iron["sessions"]]
+    assert len(iron["sessions"]) == 6 and len(driver["sessions"]) == 7
+
+
+def test_progress_axis_follows_the_session_selection(state):
+    chosen = session_dates(state)[:3]
+    call(state, "/api/sessions", method="POST", mode="swing", selected=chosen)
+    assert call(state, "/api/swing/series", label="7i 245", measure="club_speed")["dates"] == chosen[::-1]
+
+
+def test_earlier_sessions_ignore_the_session_selection(state):
+    call(state, "/api/sessions", method="POST", mode="swing", selected=session_dates(state)[:2])    # newest two only
+    review = lambda baseline: {r["label"]: r for r in call(
+        state, "/api/swing/review", session="2026-04-05", baseline=baseline)["rows"]}["driver ping"]["measures"]["carry"]["before"]
+    assert review("selected")["n"] == 12                        # the one other selected session
+    assert review("all")["n"] == 60                             # every earlier loaded session, ticked or not
+    assert review("last4")["n"] == 48                           # the 4 sessions just before, ticked or not
+    assert len(call(state, "/api/swing/overview")["sessions"]) == 2     # the review itself still lists selected sessions
+
+
+def test_dispersion_compares_with_the_same_history(state):
+    call(state, "/api/sessions", method="POST", mode="swing", selected=session_dates(state)[:2])
+    now = lambda compare: len(call(state, "/api/swing/dispersion", label="driver ping", session="2026-04-05", compare=compare)["before"]["carry"])
+    assert (now("selected"), now("all"), now("last4")) == (12, 60, 48)
+
+
+def test_pitching_review_rows_name_the_wedge_and_the_intent(state):
+    rows = call(state, "/api/pitching/review", session="2026-04-05")["rows"]
+    assert [(r["club"], r["intent"]) for r in rows] == [("gw 50", 12), ("gw 50", 11), ("gw 50", 10), ("gw 50", 9)]
+    speed = rows[0]["measures"]["speed"]
+    assert speed["n"] == 8 and speed["before"]["n"] == 32 and speed["before"]["mean"] == pytest.approx(78, abs=3)
+    assert rows[2]["measures"]["lateral"]["before"]["sd"] > 0
+
+
+# --- two measures against each other ---------------------------------------------------------------
+
+def test_scatter_groups_the_shots_by_intent(state):
+    d = call(state, "/api/pitching/scatter", club="gw 50", x="club_speed", y="carry")
+    assert [g["name"] for g in d["groups"]] == ["full", "11", "10", "9"]
+    assert all(len(g["x"]) == len(g["y"]) == len(g["dates"]) == 48 for g in d["groups"])   # 6 sessions of 8 shots
+    assert d["x"]["title"] == "Club head speed (mph)" and d["y"]["title"] == "Carry (m, simulated)"
+    full, nine = d["groups"][0], d["groups"][3]
+    assert np.mean(full["x"]) == pytest.approx(78, abs=2) and np.mean(nine["x"]) == pytest.approx(52, abs=2)
+    assert full["dates"][0] == "2026-03-01"
+
+
+def test_scatter_fit_is_a_line_through_all_the_shots(state):
+    fit = call(state, "/api/pitching/scatter", club="gw 50", x="club_speed", y="carry")["fit"]
+    assert fit["n"] == 192 and fit["r"] > 0.9                    # faster swings go further across the four intents
+    assert fit["slope"] == pytest.approx((92 - 50) / (78 - 52), rel=0.2)
+    same = call(state, "/api/pitching/scatter", club="gw 50", x="carry", y="carry")["fit"]
+    assert same["r"] == pytest.approx(1.0) and same["slope"] == pytest.approx(1.0)
+
+
+def test_scatter_uses_the_selected_sessions_and_intents(state):
+    call(state, "/api/sessions", method="POST", mode="pitching", selected=session_dates(state, "pitching")[:2])
+    call(state, "/api/wedges", method="POST", pairs=[["gw 50", 12], ["gw 50", 10]])
+    d = call(state, "/api/pitching/scatter", club="gw 50", x="club_speed", y="lateral")
+    assert [g["name"] for g in d["groups"]] == ["full", "10"] and all(len(g["x"]) == 16 for g in d["groups"])
+
+
+def test_scatter_skips_shots_missing_a_measure_and_rejects_unknown_ones(state):
+    d = call(state, "/api/pitching/scatter", club="gw 50", x="spin", y="carry")      # the test files have no spin
+    assert d["groups"] == [] and d["fit"] is None
+    assert call(state, "/api/pitching/scatter", club="lw 58", x="carry", y="lateral")["groups"] == []
+    with pytest.raises(api.ApiError, match="Unknown measure"):
+        call(state, "/api/pitching/scatter", club="gw 50", x="carry", y="nonsense")
+
+
+def test_scatter_menu_is_offered_by_the_overview(state):
+    keys = [m["key"] for m in call(state, "/api/pitching/overview")["shot_measures"]]
+    assert {"carry", "lateral", "club_speed", "ball_speed", "spin", "smash", "descent", "height"} <= set(keys)

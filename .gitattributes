@@ -1,0 +1,3 @@
+# Keep text files with the same line endings in the repository on every machine.
+* text=auto
+*.png binary

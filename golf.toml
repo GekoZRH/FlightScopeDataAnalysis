@@ -1,0 +1,72 @@
+# Configuration for the golf analysis. Paths are relative to this file.
+
+[paths]
+swing_dir = "SwingData/Indoor"
+pitching_dir = "PitchingData/Indoor"
+output_dir = "Output"
+
+[stats]
+window_weeks = 4          # Sessions tab: quick button 'Last 4 weeks'
+fallback_weeks = 12       # Sessions tab: quick button 'Last 12 weeks'
+min_shots = 12            # shots per club/intent on a card needed for meaningful statistics (else marked *)
+min_shots_skew = 25       # a skewed distribution is only considered from this many shots
+skew_alpha = 0.05         # ... and only if it fits significantly better than a normal one
+ci_level = 0.95
+n_bootstrap = 2000
+min_shots_compare = 8     # shots per period needed to call a change
+min_shots_session = 5     # shots of one session needed to compare it with earlier sessions
+seed = 12345
+
+# Raw club labels are parsed into club / variant / intent.
+#   club    : driver, 3w, 4h, 8i, pw, gw, sw, lw ...
+#   variant : the specific club (245, 241, ping, ts2, 58 ...)
+#   intent  : swing strength as clock hour (9, 10, 11); 12 = full swing / no intent selected
+# Aliases fix labels that were typed differently over time.
+# Keys are lowercase and written without the "_<intent>" suffix.
+
+[aliases.variant]
+maverick = "maverik"
+
+# Long-form names from the first sessions (14 and 15 March 2026), before the
+# clubs were labelled with loft / model in the simulator.
+[aliases.label]
+"gap wedge" = "gw 50"
+"lob wedge" = "lw 58"
+"sand wedge" = "sw 54"
+"pitching wedge" = "pw 241"
+"5 wood" = "5w ts2"
+
+# Which clubs are analysed and in which order (left to right / top to bottom).
+# Anything not listed here is loaded but ignored by the analyses.
+[bag.swing]
+clubs = [
+    "driver ping", "3w ts2", "5w ts2", "4h maverik",
+    "4i 245", "5i 245", "6i 245", "7i 245", "8i 245", "8i 241", "9i 241",
+    "pw 241", "gw 50", "sw 54", "lw 58",
+]
+intents = [12]
+
+[bag.pitching]
+clubs = ["pw 241", "gw 50", "sw 54", "lw 58"]
+intents = [9, 10, 11, 12]
+
+# Printed distance cards (one per mode). The swing card lists the bag from the top
+# (driver) down; the pitching card lists the wedges, full swing first, then 11, 10, 9.
+[cards.swing]
+title = "Full Swing - Carry Distance"
+xtick_step = 25
+minor_step = 10
+notes = [
+    """per 1m/s ~ 3.6km/h wind
+Head: -3m
+Tail: +2m""",
+    """per m height
+Driver ~ 1.5m
+Irons ~ 1.0m
+Wedges ~ 0.8m""",
+]
+
+[cards.pitching]
+title = "Wedges - Carry Distance by Swing Intent"
+xtick_step = 10
+show_roll = true

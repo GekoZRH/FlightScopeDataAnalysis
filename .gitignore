@@ -1,9 +1,28 @@
+# Personal data and results: never commit
+*.csv
+SwingData/
+PitchingData/
+Plot/
+Output/
+golf.local.json
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
 .venv/
 venv/
 .env
 
-PitchingData/
-Plot/
-SwingData/
+# Test and tool caches
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Editors and operating system
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

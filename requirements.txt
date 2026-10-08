@@ -1,0 +1,7 @@
+# Tested with Python 3.13 (conda env "golf"). Python >= 3.11 required (tomllib).
+numpy>=2.0
+pandas>=2.2
+scipy>=1.14
+matplotlib>=3.9
+plotly>=6.0
+pytest>=8.0
