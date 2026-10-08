@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Golf practice dashboard</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<main>
+  <header class="card" id="data-panel">
+    <h1>Golf practice dashboard</h1>
+    <div class="folder-row">
+      <label for="swing-dir">Full swing data</label>
+      <input type="text" id="swing-dir" spellcheck="false">
+      <button id="browse-swing" type="button">Browse</button>
+    </div>
+    <div class="folder-row">
+      <label for="pitching-dir">Pitching data</label>
+      <input type="text" id="pitching-dir" spellcheck="false">
+      <button id="browse-pitching" type="button">Browse</button>
+    </div>
+    <div class="row between">
+      <div class="muted" id="data-status">Loading…</div>
+      <button id="load" type="button">Load data</button>
+    </div>
+    <div id="warnings"></div>
+    <div id="error" class="error" hidden></div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab on" data-tab="swing" role="tab">Full swing</button>
+    <button class="tab" data-tab="pitching" role="tab">Pitching</button>
+    <span class="grow"></span>
+    <button class="tab" data-tab="bag" role="tab">Bag</button>
+    <button class="tab" data-tab="wedges" role="tab">Wedge intents</button>
+  </nav>
+
+  <section id="tab-swing">
+    <div class="card">
+      <div class="row between">
+        <h2>Session review</h2>
+        <div class="controls">
+          <label>Session <select id="sw-session"></select></label>
+          <label>Compare with <select id="sw-baseline">
+            <option value="last4">the 4 sessions before</option>
+            <option value="all">all earlier sessions</option></select></label>
+        </div>
+      </div>
+      <div class="kpis" id="sw-kpis"></div>
+      <div class="table-wrap"><table id="sw-review"></table></div>
+      <p class="muted small">Changes are this session minus the earlier shots of the same club; ± is the 95% interval. A change is only called when that interval excludes zero (exact test for small samples).</p>
+    </div>
+
+    <div class="card">
+      <div class="row between">
+        <h2>Progress</h2>
+        <div class="controls">
+          <label>Club <select id="sw-club"></select></label>
+          <label>Lower chart <select id="sw-metric">
+            <option value="carry_sd">Carry spread (sd)</option>
+            <option value="lat_sd">Lateral spread (sd)</option>
+            <option value="lat_mean">Lateral mean</option></select></label>
+        </div>
+      </div>
+      <div id="sw-progress-1" class="plot short"></div>
+      <div id="sw-progress-2" class="plot short"></div>
+    </div>
+
+    <div class="card">
+      <div class="row between">
+        <h2>Dispersion against earlier sessions</h2>
+        <div class="controls">
+          <label>Club <select id="sw-disp-club"></select></label>
+          <label>Session <select id="sw-disp-session"></select></label>
+          <label>Compare with <select id="sw-disp-compare">
+            <option value="last4">last 4 sessions</option>
+            <option value="all">all earlier sessions</option>
+            <option value="window">card window</option></select></label>
+        </div>
+      </div>
+      <div class="split">
+        <div id="sw-disp" class="plot tall"></div>
+        <div id="sw-disp-table"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row between">
+        <div><h2>Printed card</h2><p class="muted small">Built from the clubs ticked in the Bag tab, driver on top. Saved in the Output folder.</p></div>
+        <button id="sw-card" type="button" class="primary">Generate swing card</button>
+      </div>
+      <div class="muted" id="sw-card-msg"></div>
+      <img id="sw-card-img" class="card-preview" alt="" hidden>
+    </div>
+  </section>
+
+  <section id="tab-pitching" hidden>
+    <div class="card">
+      <div class="row between">
+        <h2>Session review</h2>
+        <div class="controls">
+          <label>Session <select id="pt-session"></select></label>
+          <label>Compare with <select id="pt-baseline">
+            <option value="last4">the 4 sessions before</option>
+            <option value="all">all earlier sessions</option></select></label>
+        </div>
+      </div>
+      <div class="kpis" id="pt-kpis"></div>
+      <div class="table-wrap"><table id="pt-review"></table></div>
+      <p class="muted small">Brackets show the change against the earlier shots of the same wedge and intent. Carry is simulated indoors, so club head speed is the main measure. Intents with fewer than 5 shots in the session are not compared.</p>
+    </div>
+
+    <div class="card">
+      <div class="row between">
+        <h2>Accuracy over time, by intent</h2>
+        <div class="controls">
+          <label>Wedge <select id="pt-club"></select></label>
+          <label>Measure <select id="pt-measure">
+            <option value="speed_sd">Club head speed spread (sd)</option>
+            <option value="speed_mean">Club head speed (mean)</option>
+            <option value="lateral_sd">Lateral spread (sd)</option>
+            <option value="carry_sd">Carry spread (sd, simulated)</option></select></label>
+        </div>
+      </div>
+      <div id="pt-accuracy" class="plot"></div>
+      <p class="muted small">Falling lines in the spread charts mean you are getting more consistent. Hover a point for the shot count and 95% interval.</p>
+    </div>
+
+    <div class="card">
+      <div class="row between">
+        <h2>Which is straighter to the target?</h2>
+        <div class="controls">
+          <label>Sort by <select id="pt-sort">
+            <option value="sd">Lateral spread</option>
+            <option value="offset">Offset from the target line</option>
+            <option value="rms">Both (rms)</option></select></label>
+        </div>
+      </div>
+      <div id="pt-straight" class="plot tall"></div>
+      <p class="muted small">Dot: mean miss (negative is left). Thin bar: middle 68% of shots; wide bar: middle 95%. Top row is the straightest. Based on the card window.</p>
+    </div>
+
+    <div class="card">
+      <div class="row between">
+        <h2>Which club for this distance?</h2>
+        <div class="controls">
+          <label>Target <input type="number" id="pt-target" value="70" min="10" max="150" step="1"> m</label>
+          <label>within ± <input type="number" id="pt-tol" value="3" min="1" max="20" step="0.5"> m</label>
+        </div>
+      </div>
+      <div class="table-wrap"><table id="pt-ladder"></table></div>
+    </div>
+
+    <div class="card">
+      <div class="row between">
+        <div><h2>Printed card</h2><p class="muted small">Built from the wedges and intents ticked in the Wedge intents tab.</p></div>
+        <button id="pt-card" type="button" class="primary">Generate wedge card</button>
+      </div>
+      <div class="muted" id="pt-card-msg"></div>
+      <img id="pt-card-img" class="card-preview" alt="" hidden>
+    </div>
+  </section>
+
+  <section id="tab-bag" hidden>
+    <div class="card">
+      <div class="row between">
+        <div><h2>Clubs in your bag</h2><p class="muted small">Clubs found in the swing data. Click a club to put it on the full swing card or take it off.</p></div>
+        <button id="bag-save" type="button" class="primary">Save bag</button>
+      </div>
+      <div class="chips" id="bag-chips"></div>
+      <div class="muted" id="bag-msg"></div>
+    </div>
+    <div class="card">
+      <h2>On the card, top to bottom</h2>
+      <ol id="bag-order" class="order"></ol>
+    </div>
+  </section>
+
+  <section id="tab-wedges" hidden>
+    <div class="card">
+      <div class="row between">
+        <div><h2>Wedges and intents</h2><p class="muted small">Found in the pitching data, with the number of shots. Click a cell to put that wedge and intent on the wedge card. Click a wedge name to tick or untick its whole row.</p></div>
+        <button id="wedge-save" type="button" class="primary">Save selection</button>
+      </div>
+      <div class="table-wrap"><table id="wedge-grid"></table></div>
+      <div class="muted" id="wedge-msg"></div>
+    </div>
+  </section>
+</main>
+<script src="/plotly.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -14,6 +14,7 @@ skew_alpha = 0.05         # ... and only if it fits significantly better than a 
 ci_level = 0.95
 n_bootstrap = 2000
 min_shots_compare = 8     # shots per period needed to call a change
+min_shots_session = 5     # shots of one session needed to compare it with earlier sessions
 seed = 12345
 
 # Raw club labels are parsed into club / variant / intent.

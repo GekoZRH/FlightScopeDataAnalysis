@@ -271,3 +271,40 @@ def test_card_on_real_data(real, mode):
     usable = card[card["status"] != "short"]
     assert (usable["carry_lo95"] < usable["carry_lo68"]).all() and (usable["carry_hi68"] < usable["carry_hi95"]).all()
     assert (usable["n"] >= real.stats.min_shots).all()
+
+
+# --- exact small-sample comparison ---------------------------------------------------
+
+def test_exact_comparison_has_the_stated_coverage():
+    from golf.stats import compare_normal
+
+    rng = np.random.default_rng(21)
+    hits_sd = hits_mean = 0
+    runs = 1500
+    for _ in range(runs):
+        session, before = rng.normal(100, 6, 6), rng.normal(100, 6, 24)
+        c = compare_normal(session, before, "sd")
+        hits_sd += c.low <= 0 <= c.high
+        m = compare_normal(session, before, "mean")
+        hits_mean += m.low <= 0 <= m.high
+    assert 0.93 < hits_sd / runs < 0.97
+    assert 0.93 < hits_mean / runs < 0.97
+
+
+def test_exact_comparison_finds_real_changes_and_ignores_noise():
+    from golf.stats import compare_normal
+
+    rng = np.random.default_rng(22)
+    tighter = compare_normal(rng.normal(0, 1, 12), rng.normal(0, 3, 30), "sd")
+    assert tighter.direction == -1 and tighter.estimate < 0 and tighter.high < 0
+    recent, before = rng.normal(110, 3, 12), rng.normal(100, 3, 30)
+    longer = compare_normal(recent, before, "mean")
+    assert longer.direction == 1 and longer.estimate == pytest.approx(recent.mean() - before.mean())
+    same = compare_normal(rng.normal(0, 3, 12), rng.normal(0, 3, 30), "sd")
+    assert same.low < 0 < same.high
+
+
+def test_exact_comparison_needs_enough_shots():
+    from golf.stats import compare_normal
+
+    assert compare_normal([1, 2, 3, 4], list(range(30)), "sd").direction is None
