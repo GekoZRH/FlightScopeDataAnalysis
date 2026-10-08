@@ -2,6 +2,7 @@
 
 const $ = (id) => document.getElementById(id);
 const INTENTS = [12, 11, 10, 9];
+const INTENT_COLORS = { full: "#378ADD", "11": "#1D9E75", "10": "#BA7517", "9": "#D4537E" };
 let currentTab = "swing";
 
 // ---------------------------------------------------------------- helpers
@@ -161,8 +162,8 @@ async function loadSwing() {
   await Promise.all([swingReview(), swingProgress(), swingDispersion()]);
 }
 
-function fillMeasureMenu(select, measures) {
-  const previous = select.value;
+function fillMeasureMenu(select, measures, fallback) {
+  const previous = select.value || fallback;
   const groups = [...new Set(measures.map((m) => m.group))];
   select.innerHTML = groups.map((g) =>
     `<optgroup label="${g}">` + measures.filter((m) => m.group === g).map((m) => `<option value="${m.key}">${m.title}</option>`).join("") + "</optgroup>").join("");
@@ -260,7 +261,10 @@ async function loadPitching() {
   fillSelect($("pt-club"), o.choices.map((c) => c.club));
   fillIntents();
   fillMeasureMenu($("pt-metric"), o.measures);
-  await Promise.all([pitchingReview(), pitchingProgress(), pitchingStraightness(), pitchingLadder()]);
+  fillSelect($("sc-club"), o.choices.map((c) => c.club));
+  fillMeasureMenu($("sc-x"), o.shot_measures, "club_speed");
+  fillMeasureMenu($("sc-y"), o.shot_measures, "carry");
+  await Promise.all([pitchingReview(), pitchingProgress(), pitchingScatter(), pitchingStraightness(), pitchingLadder()]);
 }
 
 async function pitchingReview() {
@@ -300,6 +304,32 @@ async function pitchingProgress() {
     progressChart("/api/pitching/series", label, "club_speed", "pt-progress-2", "#D4537E"),
     progressChart("/api/pitching/series", label, $("pt-metric").value, "pt-progress-3", "#1D9E75"),
   ]);
+}
+
+async function pitchingScatter() {
+  const club = $("sc-club").value;
+  if (!club) return;
+  const d = await api("/api/pitching/scatter", { params: { club, x: $("sc-x").value, y: $("sc-y").value } });
+  const traces = d.groups.map((g) => ({
+    x: g.x, y: g.y, name: g.name, mode: "markers", marker: { color: INTENT_COLORS[g.name], size: 8, opacity: 0.8 },
+    customdata: g.dates,
+    hovertemplate: `${d.x.title}: %{x}<br>${d.y.title}: %{y}<br>%{customdata}<extra>${g.name}</extra>`,
+  }));
+  const fit = d.fit;
+  if ($("sc-fit").checked && fit) {
+    const all = d.groups.flatMap((g) => g.x);
+    const lo = Math.min(...all), hi = Math.max(...all);
+    traces.push({
+      x: [lo, hi], y: [fit.slope * lo + fit.intercept, fit.slope * hi + fit.intercept], mode: "lines", name: "fit",
+      line: { color: css("--muted"), dash: "dash", width: 2 }, hoverinfo: "skip",
+    });
+  }
+  const shots = d.groups.reduce((sum, g) => sum + g.x.length, 0);
+  $("sc-note").textContent = !shots ? "No shots with both measures for this wedge in the selected sessions."
+    : `${shots} shots, colour = intent.` + (fit ? ` Correlation r = ${fit.r.toFixed(2)}; fitted slope ${Number(fit.slope.toPrecision(2))} (change in y per unit of x).` : "");
+  draw("sc-plot", traces, baseLayout({
+    xaxis: { title: { text: d.x.title }, showgrid: true }, yaxis: { title: { text: d.y.title }, showgrid: true },
+  }));
 }
 
 async function pitchingStraightness() {
@@ -503,6 +533,7 @@ function wire() {
   $("sw-card").addEventListener("click", guard(() => makeCard("swing", "sw")));
 
   for (const id of ["pt-session", "pt-baseline"]) $(id).addEventListener("change", guard(pitchingReview));
+  for (const id of ["sc-club", "sc-x", "sc-y", "sc-fit"]) $(id).addEventListener("change", guard(pitchingScatter));
   $("pt-club").addEventListener("change", guard(async () => { fillIntents(); await pitchingProgress(); }));
   for (const id of ["pt-intent", "pt-metric"]) $(id).addEventListener("change", guard(pitchingProgress));
   $("pt-sort").addEventListener("change", guard(pitchingStraightness));

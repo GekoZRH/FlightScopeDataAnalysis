@@ -46,6 +46,7 @@ GET: Dict[str, Callable] = {
         s, "swing", _first(q, "label"), _first(q, "session"), q.get("compare", "last4")),
     "/api/pitching/overview": lambda s, q, b: service.pitching_overview(s),
     "/api/pitching/review": lambda s, q, b: service.pitching_review(s, _first(q, "session"), q.get("baseline", "last4")),
+    "/api/pitching/scatter": lambda s, q, b: service.scatter(s, _first(q, "club"), q.get("x", "club_speed"), q.get("y", "carry")),
     "/api/pitching/series": lambda s, q, b: service.series(s, "pitching", _first(q, "label"), _first(q, "measure")),
     "/api/pitching/straightness": lambda s, q, b: service.straightness(s),
     "/api/pitching/ladder": lambda s, q, b: service.ladder(s, float(q.get("target", 70)), float(q.get("tolerance", 3))),

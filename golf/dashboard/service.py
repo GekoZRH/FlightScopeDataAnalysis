@@ -390,6 +390,7 @@ def pitching_overview(state: AppState) -> Dict:
     return clean({
         "sessions": sessions_of(df), "labels": labels, "choices": choices,
         "loaded": state.shots["pitching"] is not None, "measures": series_menu(),
+        "shot_measures": shot_measure_menu(),
     })
 
 
@@ -442,6 +443,75 @@ def ladder(state: AppState, target: float, tolerance: float) -> Dict:
         })
     rows.sort(key=lambda r: -r["chance"])
     return clean({"target": target, "tolerance": tolerance, "rows": rows[:8]})
+
+
+# --- two measures against each other -----------------------------------------------------------------
+
+# Per-shot measures for the scatter plot: key -> (column, title, group in the menus).
+SHOT_MEASURES = {
+    "carry": ("carry_m", "Carry (m, simulated)", "Distance"),
+    "lateral": ("lateral_m", "Lateral (m, negative = left)", "Distance"),
+    "roll": ("roll_m", "Roll (m)", "Distance"),
+    "total": ("total_m", "Total distance (m)", "Distance"),
+    "club_speed": ("club_speed_mph", "Club head speed (mph)", "Club"),
+    "aoa": ("aoa_deg", "Angle of attack (deg)", "Club"),
+    "club_path": ("club_path_deg", "Club path (deg, negative = left)", "Club"),
+    "dynamic_loft": ("dynamic_loft_deg", "Dynamic loft (deg)", "Club"),
+    "spin_loft": ("spin_loft_deg", "Spin loft (deg)", "Club"),
+    "low_point": ("low_point_cm", "Low point (cm)", "Club"),
+    "impact_lateral": ("lateral_impact_mm", "Impact, lateral (mm)", "Club"),
+    "impact_vertical": ("vertical_impact_mm", "Impact, vertical (mm)", "Club"),
+    "ball_speed": ("ball_speed_mph", "Ball speed (mph)", "Ball flight"),
+    "smash": ("smash", "Smash factor", "Ball flight"),
+    "spin": ("spin_rpm", "Spin (rpm)", "Ball flight"),
+    "spin_axis": ("spin_axis_deg", "Spin axis (deg, negative = left)", "Ball flight"),
+    "launch_v": ("launch_v_deg", "Launch angle (deg)", "Ball flight"),
+    "descent": ("descent_v_deg", "Descent angle (deg)", "Ball flight"),
+    "height": ("height_m", "Peak height (m)", "Ball flight"),
+    "flight_time": ("flight_time_s", "Flight time (s)", "Ball flight"),
+}
+
+
+def shot_measure_menu() -> List[Dict]:
+    return [{"key": key, "title": title, "group": group} for key, (_, title, group) in SHOT_MEASURES.items()]
+
+
+def scatter(state: AppState, club: str, x: str, y: str) -> Dict:
+    """Every shot of one wedge (all its selected intents, all selected sessions): measure `x` against `y`.
+
+    The shots come back grouped by intent so the page can colour them. `fit` is one straight line
+    through all the plotted shots (least squares) with its correlation, or None if there is no line to draw.
+    """
+    for key in (x, y):
+        if key not in SHOT_MEASURES:
+            raise ValueError(f"Unknown measure: {key}")
+    (x_col, x_title, _), (y_col, y_title, _) = SHOT_MEASURES[x], SHOT_MEASURES[y]
+    df = state.selected("pitching")
+    groups = []
+    xs, ys = [], []
+    if not df.empty:
+        frame = df[club_variant(df) == club].dropna(subset=[x_col, y_col])
+        for intent in sorted(frame["intent"].unique(), reverse=True):
+            part = frame[frame["intent"] == intent]
+            groups.append({
+                "intent": int(intent), "name": "full" if int(intent) == FULL_SWING else str(int(intent)),
+                "x": part[x_col].round(3).tolist(), "y": part[y_col].round(3).tolist(),
+                "dates": [str(d) for d in part["session_date"]],
+            })
+            xs += part[x_col].tolist()
+            ys += part[y_col].tolist()
+    return clean({
+        "club": club, "x": {"key": x, "title": x_title}, "y": {"key": y, "title": y_title},
+        "groups": groups, "fit": _line_fit(np.asarray(xs, dtype=float), np.asarray(ys, dtype=float)),
+    })
+
+
+def _line_fit(x: np.ndarray, y: np.ndarray) -> Optional[Dict]:
+    """Least-squares line y = slope * x + intercept and the correlation r (None if it is undefined)."""
+    if len(x) < 3 or np.std(x) == 0 or np.std(y) == 0:
+        return None
+    slope, intercept = np.polyfit(x, y, 1)
+    return {"slope": float(slope), "intercept": float(intercept), "r": float(np.corrcoef(x, y)[0, 1]), "n": int(len(x))}
 
 
 # --- sessions -------------------------------------------------------------------------------------

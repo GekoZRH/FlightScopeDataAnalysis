@@ -169,6 +169,20 @@
 
     <div class="card">
       <div class="row between">
+        <h2>Compare two measures</h2>
+        <div class="controls">
+          <label>Wedge <select id="sc-club"></select></label>
+          <label>X axis <select id="sc-x"></select></label>
+          <label>Y axis <select id="sc-y"></select></label>
+          <label><input type="checkbox" id="sc-fit"> Fit line</label>
+        </div>
+      </div>
+      <div id="sc-plot" class="plot tall"></div>
+      <p class="muted small" id="sc-note"></p>
+    </div>
+
+    <div class="card">
+      <div class="row between">
         <h2>Which is straighter to the target?</h2>
         <div class="controls">
           <label>Sort by <select id="pt-sort">

@@ -465,3 +465,43 @@ def test_pitching_review_rows_name_the_wedge_and_the_intent(state):
     speed = rows[0]["measures"]["speed"]
     assert speed["n"] == 8 and speed["before"]["n"] == 32 and speed["before"]["mean"] == pytest.approx(78, abs=3)
     assert rows[2]["measures"]["lateral"]["before"]["sd"] > 0
+
+
+# --- two measures against each other ---------------------------------------------------------------
+
+def test_scatter_groups_the_shots_by_intent(state):
+    d = call(state, "/api/pitching/scatter", club="gw 50", x="club_speed", y="carry")
+    assert [g["name"] for g in d["groups"]] == ["full", "11", "10", "9"]
+    assert all(len(g["x"]) == len(g["y"]) == len(g["dates"]) == 48 for g in d["groups"])   # 6 sessions of 8 shots
+    assert d["x"]["title"] == "Club head speed (mph)" and d["y"]["title"] == "Carry (m, simulated)"
+    full, nine = d["groups"][0], d["groups"][3]
+    assert np.mean(full["x"]) == pytest.approx(78, abs=2) and np.mean(nine["x"]) == pytest.approx(52, abs=2)
+    assert full["dates"][0] == "2026-03-01"
+
+
+def test_scatter_fit_is_a_line_through_all_the_shots(state):
+    fit = call(state, "/api/pitching/scatter", club="gw 50", x="club_speed", y="carry")["fit"]
+    assert fit["n"] == 192 and fit["r"] > 0.9                    # faster swings go further across the four intents
+    assert fit["slope"] == pytest.approx((92 - 50) / (78 - 52), rel=0.2)
+    same = call(state, "/api/pitching/scatter", club="gw 50", x="carry", y="carry")["fit"]
+    assert same["r"] == pytest.approx(1.0) and same["slope"] == pytest.approx(1.0)
+
+
+def test_scatter_uses_the_selected_sessions_and_intents(state):
+    call(state, "/api/sessions", method="POST", mode="pitching", selected=session_dates(state, "pitching")[:2])
+    call(state, "/api/wedges", method="POST", pairs=[["gw 50", 12], ["gw 50", 10]])
+    d = call(state, "/api/pitching/scatter", club="gw 50", x="club_speed", y="lateral")
+    assert [g["name"] for g in d["groups"]] == ["full", "10"] and all(len(g["x"]) == 16 for g in d["groups"])
+
+
+def test_scatter_skips_shots_missing_a_measure_and_rejects_unknown_ones(state):
+    d = call(state, "/api/pitching/scatter", club="gw 50", x="spin", y="carry")      # the test files have no spin
+    assert d["groups"] == [] and d["fit"] is None
+    assert call(state, "/api/pitching/scatter", club="lw 58", x="carry", y="lateral")["groups"] == []
+    with pytest.raises(api.ApiError, match="Unknown measure"):
+        call(state, "/api/pitching/scatter", club="gw 50", x="carry", y="nonsense")
+
+
+def test_scatter_menu_is_offered_by_the_overview(state):
+    keys = [m["key"] for m in call(state, "/api/pitching/overview")["shot_measures"]]
+    assert {"carry", "lateral", "club_speed", "ball_speed", "spin", "smash", "descent", "height"} <= set(keys)
