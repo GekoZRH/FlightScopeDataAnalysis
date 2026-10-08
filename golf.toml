@@ -48,3 +48,24 @@ intents = [12]
 [bag.pitching]
 clubs = ["pw 241", "gw 50", "sw 54", "lw 58"]
 intents = [9, 10, 11, 12]
+
+# Printed distance cards (one per mode). The swing card lists the bag from the top
+# (driver) down; the pitching card lists the wedges, full swing first, then 11, 10, 9.
+[cards.swing]
+title = "Full Swing - Carry Distance"
+xtick_step = 25
+minor_step = 10
+notes = [
+    """per 1m/s ~ 3.6km/h wind
+Head: -3m
+Tail: +2m""",
+    """per m height
+Driver ~ 1.5m
+Irons ~ 1.0m
+Wedges ~ 0.8m""",
+]
+
+[cards.pitching]
+title = "Wedges - Carry Distance by Swing Intent"
+xtick_step = 10
+show_roll = true

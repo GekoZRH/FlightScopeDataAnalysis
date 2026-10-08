@@ -7,12 +7,14 @@ import pandas as pd
 from golf.config import BagSpec
 
 
-def select_bag(shots: pd.DataFrame, spec: BagSpec) -> pd.DataFrame:
+def select_bag(shots: pd.DataFrame, spec: BagSpec, *, full_swing_first: bool = False) -> pd.DataFrame:
     """Keep only the configured clubs and intents, sorted in bag order.
 
     A bag entry such as '8i 241' matches on club + variant; the swing intent is
     filtered separately through `spec.intents`. Rows without a recorded carry
-    are kept, since they still carry information such as club speed.
+    are kept, since they still carry information such as club speed. With
+    `full_swing_first`, the intents of one club are ordered full swing, 11, 10, 9
+    instead of 9, 10, 11, full swing.
     """
     order = {club: position for position, club in enumerate(spec.clubs)}
     base = (shots["club"].fillna("") + " " + shots["variant"].fillna("")).str.strip()
@@ -20,7 +22,13 @@ def select_bag(shots: pd.DataFrame, spec: BagSpec) -> pd.DataFrame:
     keep = base.isin(order) & shots["intent"].isin(spec.intents)
     out = shots[keep].copy()
     out["bag_order"] = base[keep].map(order).astype(int)
-    out = out.sort_values(["bag_order", "intent", "timestamp", "shot_index"], kind="stable")
+    if full_swing_first:
+        # 12 (full swing), 11, 10, 9 ... within each club
+        out["intent_order"] = -out["intent"].astype(int)
+    else:
+        out["intent_order"] = out["intent"].astype(int)
+    out = out.sort_values(["bag_order", "intent_order", "timestamp", "shot_index"], kind="stable")
+    out = out.drop(columns="intent_order")
     return out.reset_index(drop=True)
 
 

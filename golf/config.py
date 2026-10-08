@@ -23,6 +23,17 @@ class BagSpec:
 
 
 @dataclass(frozen=True)
+class CardSpec:
+    """Look of one printed distance card."""
+
+    title: str
+    notes: Tuple[str, ...] = ()     # free text blocks (e.g. wind rules of thumb) in the empty upper left
+    xtick_step: int = 10
+    minor_step: int = 0             # 0 = no minor grid
+    show_roll: bool = False         # print the mean roll at the end of each bar
+
+
+@dataclass(frozen=True)
 class StatsSettings:
     """Thresholds for the statistics. Defaults match golf.toml."""
 
@@ -47,6 +58,7 @@ class Config:
     variant_aliases: Dict[str, str] = field(default_factory=dict)
     bag: Dict[str, BagSpec] = field(default_factory=dict)
     stats: StatsSettings = field(default_factory=StatsSettings)
+    cards: Dict[str, CardSpec] = field(default_factory=dict)
 
     def data_dir(self, mode: str) -> Path:
         if mode == "swing":
@@ -78,6 +90,14 @@ def load_config(path: Optional[Path] = None) -> Config:
             intents=tuple(int(i) for i in spec.get("intents", [FULL_SWING])),
         )
 
+    cards: Dict[str, CardSpec] = {}
+    for mode, spec in raw.get("cards", {}).items():
+        if mode not in MODES:
+            raise ValueError(f"[cards.{mode}] is not a known mode, expected one of {MODES}")
+        values = dict(spec)
+        values["notes"] = tuple(values.get("notes", ()))
+        cards[mode] = CardSpec(**values)
+
     return Config(
         root=root,
         swing_dir=root / paths["swing_dir"],
@@ -87,4 +107,5 @@ def load_config(path: Optional[Path] = None) -> Config:
         variant_aliases=dict(aliases.get("variant", {})),
         bag=bag,
         stats=StatsSettings(**raw.get("stats", {})),
+        cards=cards,
     )
