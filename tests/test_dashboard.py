@@ -325,8 +325,8 @@ def test_only_the_selected_sessions_are_analysed(state):
 
     assert call(state, "/api/swing/overview")["sessions"] == chosen
     assert [s["date"] for s in call(state, "/api/swing/series", label="driver ping", measure="carry_mean")["sessions"]] == chosen[::-1]
-    newest = {r["label"]: r for r in call(state, "/api/swing/review", session=chosen[0], baseline="all")["rows"]}
-    assert newest["driver ping"]["n_before"] == 24           # two earlier sessions of 12 shots, not five
+    newest = {r["label"]: r for r in call(state, "/api/swing/review", session=chosen[0], baseline="selected")["rows"]}
+    assert newest["driver ping"]["n_before"] == 24           # the two other selected sessions of 12 shots
     card = call(state, "/api/card", method="POST", mode="swing")
     assert card["sessions"] == 3 and card["from"] == chosen[-1] and card["as_of"] == chosen[0]
 
@@ -385,3 +385,57 @@ def test_the_command_line_card_uses_the_saved_selection(state, tmp_path):
     import matplotlib.image as image
     assert image.imread(state.config.cards_dir("swing") / "swing_distance_card.png").shape[0] == 4050
     assert (state.config.cards_dir("swing") / "archive" / f"{chosen[0]}_swing_distance_card.png").exists()
+
+
+def test_review_can_compare_with_all_other_selected_sessions(state):
+    review = lambda baseline, session="2026-04-05": {
+        r["label"]: r for r in call(state, "/api/swing/review", session=session, baseline=baseline)["rows"]}
+    driver = review("selected")["driver ping"]["measures"]["carry"]
+    assert driver["before"]["n"] == 60                          # the 5 other sessions of 12 shots; this one is left out
+    pool = state.selected("swing")
+    pool = pool[(pool["label"] == "driver ping") & (pool["session_date"] != date(2026, 4, 5))]["carry_m"]
+    assert driver["before"]["mean"] == pytest.approx(pool.mean(), abs=1e-3)
+    assert driver["before"]["sd"] == pytest.approx(pool.std(ddof=1), abs=1e-3)
+    # earlier AND later selected sessions count, so the first session is compared with all the others
+    assert review("selected", "2026-03-01")["driver ping"]["measures"]["carry"]["before"]["n"] == 60
+    assert review("all", "2026-03-01")["driver ping"]["measures"]["carry"]["before"]["n"] == 0
+
+
+def test_all_selected_sessions_follows_the_session_selection(state):
+    call(state, "/api/sessions", method="POST", mode="swing", selected=session_dates(state)[:3])
+    row = {r["label"]: r for r in call(state, "/api/swing/review", session=session_dates(state)[0], baseline="selected")["rows"]}
+    assert row["driver ping"]["measures"]["carry"]["before"]["n"] == 24
+    pitching = call(state, "/api/pitching/review", session="2026-04-05", baseline="selected")["rows"]
+    assert {r["label"]: r for r in pitching}["gw 50"]["n_before"] == 40            # 5 other sessions of 8 shots
+
+
+def test_progress_axis_has_every_selected_session(state, tmp_path):
+    write_session(tmp_path / "swing", date(2026, 4, 12), [("Driver Ping", 205.0 + i, 1.0, 99.0) for i in range(12)])   # no 7-iron
+    call(state, "/api/load", method="POST", swing_dir=str(tmp_path / "swing"))
+    iron = call(state, "/api/swing/series", label="7i 245", measure="carry_mean")
+    driver = call(state, "/api/swing/series", label="driver ping", measure="carry_mean")
+    assert len(iron["dates"]) == 7 and iron["dates"] == driver["dates"] == sorted(iron["dates"])
+    assert "2026-04-12" in iron["dates"] and "2026-04-12" not in [s["date"] for s in iron["sessions"]]
+    assert len(iron["sessions"]) == 6 and len(driver["sessions"]) == 7
+
+
+def test_progress_axis_follows_the_session_selection(state):
+    chosen = session_dates(state)[:3]
+    call(state, "/api/sessions", method="POST", mode="swing", selected=chosen)
+    assert call(state, "/api/swing/series", label="7i 245", measure="club_speed")["dates"] == chosen[::-1]
+
+
+def test_earlier_sessions_ignore_the_session_selection(state):
+    call(state, "/api/sessions", method="POST", mode="swing", selected=session_dates(state)[:2])    # newest two only
+    review = lambda baseline: {r["label"]: r for r in call(
+        state, "/api/swing/review", session="2026-04-05", baseline=baseline)["rows"]}["driver ping"]["measures"]["carry"]["before"]
+    assert review("selected")["n"] == 12                        # the one other selected session
+    assert review("all")["n"] == 60                             # every earlier loaded session, ticked or not
+    assert review("last4")["n"] == 48                           # the 4 sessions just before, ticked or not
+    assert len(call(state, "/api/swing/overview")["sessions"]) == 2     # the review itself still lists selected sessions
+
+
+def test_dispersion_compares_with_the_same_history(state):
+    call(state, "/api/sessions", method="POST", mode="swing", selected=session_dates(state)[:2])
+    now = lambda compare: len(call(state, "/api/swing/dispersion", label="driver ping", session="2026-04-05", compare=compare)["before"]["carry"])
+    assert (now("selected"), now("all"), now("last4")) == (12, 60, 48)

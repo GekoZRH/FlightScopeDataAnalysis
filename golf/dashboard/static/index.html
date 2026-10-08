@@ -79,12 +79,13 @@
           <label>Session <select id="sw-session"></select></label>
           <label>Compare with <select id="sw-baseline">
             <option value="last4">the 4 sessions before</option>
-            <option value="all">all earlier sessions</option></select></label>
+            <option value="all">all earlier sessions</option>
+            <option value="selected">all other selected sessions</option></select></label>
         </div>
       </div>
       <div class="kpis" id="sw-kpis"></div>
       <div class="table-wrap"><table id="sw-review"></table></div>
-      <p class="muted small">Historic is the earlier shots of the same club, as chosen under "Compare with" (only sessions ticked on the Sessions tab). Spread is the standard deviation (sd) of the shots; n is the number of historic shots.</p>
+      <p class="muted small">Historic is the shots of the same club chosen under "Compare with": the 4 sessions before this one, or all earlier sessions (both from every loaded session, ticked or not), or all other sessions ticked on the Sessions tab. Spread is the standard deviation (sd) of the shots; n is the number of historic shots.</p>
     </div>
 
     <div class="card">
@@ -111,7 +112,8 @@
           <label>Session <select id="sw-disp-session"></select></label>
           <label>Compare with <select id="sw-disp-compare">
             <option value="last4">last 4 sessions</option>
-            <option value="all">all earlier sessions</option></select></label>
+            <option value="all">all earlier sessions</option>
+            <option value="selected">all other selected sessions</option></select></label>
         </div>
       </div>
       <div class="split">
@@ -138,7 +140,8 @@
           <label>Session <select id="pt-session"></select></label>
           <label>Compare with <select id="pt-baseline">
             <option value="last4">the 4 sessions before</option>
-            <option value="all">all earlier sessions</option></select></label>
+            <option value="all">all earlier sessions</option>
+            <option value="selected">all other selected sessions</option></select></label>
         </div>
       </div>
       <div class="kpis" id="pt-kpis"></div>

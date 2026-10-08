@@ -28,7 +28,11 @@ from golf.stats import (
     session_summary,
 )
 
-BASELINE_CHOICES = {"last4": 4, "all": None}
+# What a session is compared with ("historic"):
+#   last4     the 4 sessions before it, among all loaded sessions (selected or not)
+#   all       all earlier sessions, among all loaded sessions (selected or not)
+#   selected  all other selected sessions, earlier or later (the session itself is left out)
+BASELINE_CHOICES = {"last4": 4, "all": None, "selected": None}
 
 
 # --- state ---------------------------------------------------------------------------
@@ -62,6 +66,13 @@ class AppState:
         if shots is None:
             return None
         return include_sessions(shots, self.config.excluded_sessions.get(mode, ()))
+
+    def in_bag(self, mode: str) -> pd.DataFrame:
+        """Shots of the chosen clubs and intents in every loaded session, selected or not."""
+        shots = self.shots[mode]
+        if shots is None:
+            return pd.DataFrame()
+        return select_bag(shots, self.config.bag[mode], full_swing_first=True)
 
     def selected(self, mode: str) -> pd.DataFrame:
         """Shots of the chosen sessions, limited to the clubs and intents chosen for `mode`, in card order."""
@@ -153,6 +164,16 @@ def sessions_of(df: pd.DataFrame) -> List[str]:
     return [str(d) for d in sorted(df["session_date"].unique(), reverse=True)]
 
 
+def _history(state: AppState, mode: str, label: str, session: date, how: str) -> pd.DataFrame:
+    """The shots of one club that the session `session` is compared with, see BASELINE_CHOICES."""
+    if how == "selected":
+        pool = state.selected(mode)
+        pool = pool[pool["label"] == label]
+        return pool[pool["session_date"] != session]
+    pool = state.in_bag(mode)
+    return _baseline(pool[pool["label"] == label], session, how)
+
+
 def _baseline(df_label: pd.DataFrame, session: date, how: str) -> pd.DataFrame:
     earlier = df_label[df_label["session_date"] < session]
     dates = sorted(earlier["session_date"].unique())
@@ -195,7 +216,7 @@ def review(state: AppState, mode: str, session: str, baseline: str, measures: Di
         now = group[group["session_date"] == day]
         if now.empty:
             continue
-        before = _baseline(group, day, baseline)
+        before = _history(state, mode, label, day, baseline)
         row = {"label": label, "n": int(len(now)), "n_before": int(len(before)), "measures": {}}
         for name, column in measures.items():
             cur, prev = now[column].dropna(), before[column].dropna()
@@ -264,20 +285,26 @@ def series_menu() -> List[Dict]:
 
 
 def series(state: AppState, mode: str, label: str, measure: str) -> Dict:
-    """One measure per session for one club, with 95% intervals (mean or spread, see SERIES)."""
+    """One measure per session for one club, with 95% intervals (mean or spread, see SERIES).
+
+    `dates` lists every selected session, so the charts show the same sessions for every club;
+    `sessions` only holds the sessions in which this club was hit.
+    """
     if measure not in SERIES:
         raise ValueError(f"Unknown measure: {measure}")
     column, kind, title, _ = SERIES[measure]
     df = state.selected(mode)
+    included = state.included(mode)
+    dates = sorted({str(d) for d in included["session_date"]}) if included is not None else []
     if df.empty:
-        return {"label": label, "title": title, "sessions": []}
+        return {"label": label, "title": title, "dates": dates, "sessions": []}
     group = df[df["label"] == label]
     summary = session_summary(group, column, by=["label"], level=state.config.stats.ci_level)
     sessions = [{
         "date": row["session_date"], "n": row["n"],
         "y": row[kind], "lo": row[f"{kind}_lo"], "hi": row[f"{kind}_hi"],
     } for _, row in summary.iterrows()]
-    return clean({"label": label, "title": title, "sessions": sessions})
+    return clean({"label": label, "title": title, "dates": dates, "sessions": sessions})
 
 
 def _ring(x: np.ndarray, y: np.ndarray, coverage: float, state: AppState, grid: int = 90) -> List[List[float]]:
@@ -309,7 +336,7 @@ def dispersion(state: AppState, mode: str, label: str, session: str, compare: st
     day = _parse_day(session)
     now = group[group["session_date"] == day]
 
-    before = _baseline(group, day, compare)
+    before = _history(state, mode, label, day, compare).dropna(subset=["carry_m", "lateral_m"])
 
     def points(frame):
         return {"lateral": frame["lateral_m"].round(2).tolist(), "carry": frame["carry_m"].round(2).tolist()}

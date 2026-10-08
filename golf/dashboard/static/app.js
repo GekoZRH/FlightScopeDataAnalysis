@@ -194,9 +194,11 @@ async function swingSeries(measure, id, color) {
     draw(id, [], baseLayout({ annotations: [{ text: "No data for this club", showarrow: false, font: { color: css("--muted") } }], xaxis: { visible: false }, yaxis: { visible: false } }));
     return;
   }
-  const s = d.sessions;
-  sessionChart(id, s.map((x) => x.date), [{
-    name: d.title, color, y: s.map((x) => x.y), lo: s.map((x) => x.lo), hi: s.map((x) => x.hi), n: s.map((x) => x.n),
+  // every selected session is on the axis; sessions without this club have no point and the line bridges them
+  const byDate = new Map(d.sessions.map((x) => [x.date, x]));
+  const pick = (field) => d.dates.map((date) => (byDate.has(date) ? byDate.get(date)[field] : null));
+  sessionChart(id, d.dates, [{
+    name: d.title, color, y: pick("y"), lo: pick("lo"), hi: pick("hi"), n: pick("n"),
   }], { title: d.title, band: true });
 }
 
