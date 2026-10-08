@@ -439,3 +439,11 @@ def test_dispersion_compares_with_the_same_history(state):
     call(state, "/api/sessions", method="POST", mode="swing", selected=session_dates(state)[:2])
     now = lambda compare: len(call(state, "/api/swing/dispersion", label="driver ping", session="2026-04-05", compare=compare)["before"]["carry"])
     assert (now("selected"), now("all"), now("last4")) == (12, 60, 48)
+
+
+def test_pitching_review_rows_name_the_wedge_and_the_intent(state):
+    rows = call(state, "/api/pitching/review", session="2026-04-05")["rows"]
+    assert [(r["club"], r["intent"]) for r in rows] == [("gw 50", 12), ("gw 50", 11), ("gw 50", 10), ("gw 50", 9)]
+    speed = rows[0]["measures"]["speed"]
+    assert speed["n"] == 8 and speed["before"]["n"] == 32 and speed["before"]["mean"] == pytest.approx(78, abs=3)
+    assert rows[2]["measures"]["lateral"]["before"]["sd"] > 0

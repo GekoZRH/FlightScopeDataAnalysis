@@ -217,7 +217,11 @@ def review(state: AppState, mode: str, session: str, baseline: str, measures: Di
         if now.empty:
             continue
         before = _history(state, mode, label, day, baseline)
-        row = {"label": label, "n": int(len(now)), "n_before": int(len(before)), "measures": {}}
+        first = now.iloc[0]
+        row = {
+            "label": label, "club": f"{first['club']} {first['variant'] or ''}".strip(), "intent": int(first["intent"]),
+            "n": int(len(now)), "n_before": int(len(before)), "measures": {},
+        }
         for name, column in measures.items():
             cur, prev = now[column].dropna(), before[column].dropna()
             entry = _measure(now[column])

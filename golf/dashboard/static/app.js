@@ -261,24 +261,24 @@ async function loadPitching() {
   await Promise.all([pitchingReview(), pitchingAccuracy(), pitchingStraightness(), pitchingLadder()]);
 }
 
-function spreadCell(m, unit, digits = 1) {
-  const c = m.d_sd;
-  const delta = c && c.est != null ? ` <span class="${c.dir === -1 ? "good" : c.dir === 1 ? "bad" : "pm"}">(${signed(c.est, digits)})</span>` : "";
-  return `${num(m.sd, digits)} ${unit}${delta}`;
-}
-
 async function pitchingReview() {
-  if (!$("pt-session").value) { $("pt-review").innerHTML = ""; kpis($("pt-kpis"), { shots: 0, clubs: 0, tighter: 0, broader: 0 }); return; }
+  if (!$("pt-session").value) { $("pt-review").innerHTML = ""; kpis($("pt-kpis"), { shots: 0, clubs: 0 }); return; }
   const r = await api("/api/pitching/review", { params: { session: $("pt-session").value, baseline: $("pt-baseline").value } });
-  kpis($("pt-kpis"), r.kpi);
+  kpis($("pt-kpis"), { shots: r.kpi.shots, clubs: r.kpi.clubs });
+  const sd = (m, unit) => (m.n > 1 ? `${num(m.sd)} ${unit}` : "–");
+  const historicSd = (m, unit) => (m.before.n > 1 ? `${num(m.before.sd)} ${unit}` : "–");
   const rows = r.rows.map((row) => {
     const s = row.measures.speed, c = row.measures.carry, l = row.measures.lateral;
-    return `<tr><td>${row.label}</td><td>${row.n}</td><td>${num(s.mean)} mph</td><td>${spreadCell(s, "mph")}</td>` +
-      `<td>${num(c.mean, 0)} m</td><td>${spreadCell(c, "m")}</td><td>${spreadCell(l, "m")}</td><td>${verdict(row.verdict)}</td></tr>`;
+    return `<tr><td>${row.club}</td><td>${intentName(row.intent)}</td><td>${row.n}</td>` +
+      `<td>${num(s.mean)} mph</td><td>${sd(s, "mph")}</td>` +
+      `<td>${s.before.n ? num(s.before.mean) + " mph" : "–"} <span class="pm">n=${s.before.n}</span></td><td>${historicSd(s, "mph")}</td>` +
+      `<td>${num(c.mean, 0)} m</td><td>${sd(c, "m")}</td>` +
+      `<td>${sd(l, "m")}</td><td>${historicSd(l, "m")}</td></tr>`;
   }).join("");
-  $("pt-review").innerHTML = "<tr><th>Wedge, intent</th><th>Shots</th><th>Club speed</th><th>Speed spread (sd)</th>" +
-    "<th>Carry (sim.)</th><th>Carry spread (sd)</th><th>Lateral spread (sd)</th><th>Speed spread</th></tr>" +
-    (rows || '<tr><td colspan="8" class="muted">No shots for the selected wedges in this session.</td></tr>');
+  $("pt-review").innerHTML = "<tr><th>Wedge</th><th>Intent</th><th>Shots</th><th>Session club speed</th><th>Session speed spread (sd)</th>" +
+    "<th>Historic club speed</th><th>Historic speed spread (sd)</th><th>Session carry (sim.)</th><th>Session carry spread (sd)</th>" +
+    "<th>Session lateral spread (sd)</th><th>Historic lateral spread (sd)</th></tr>" +
+    (rows || '<tr><td colspan="11" class="muted">No shots for the selected wedges in this session.</td></tr>');
 }
 
 async function pitchingAccuracy() {
