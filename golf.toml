@@ -1,0 +1,39 @@
+# Configuration for the golf analysis. Paths are relative to this file.
+
+[paths]
+swing_dir = "SwingData/Indoor"
+pitching_dir = "PitchingData/Indoor"
+output_dir = "Output"
+
+# Raw club labels are parsed into club / variant / intent.
+#   club    : driver, 3w, 4h, 8i, pw, gw, sw, lw ...
+#   variant : the specific club (245, 241, ping, ts2, 58 ...)
+#   intent  : swing strength as clock hour (9, 10, 11); 12 = full swing / no intent selected
+# Aliases fix labels that were typed differently over time.
+# Keys are lowercase and written without the "_<intent>" suffix.
+
+[aliases.variant]
+maverick = "maverik"
+
+# Long-form names from the first sessions (14 and 15 March 2026), before the
+# clubs were labelled with loft / model in the simulator.
+[aliases.label]
+"gap wedge" = "gw 50"
+"lob wedge" = "lw 58"
+"sand wedge" = "sw 54"
+"pitching wedge" = "pw 241"
+"5 wood" = "5w ts2"
+
+# Which clubs are analysed and in which order (left to right / top to bottom).
+# Anything not listed here is loaded but ignored by the analyses.
+[bag.swing]
+clubs = [
+    "driver ping", "3w ts2", "5w ts2", "4h maverik",
+    "4i 245", "5i 245", "6i 245", "7i 245", "8i 245", "8i 241", "9i 241",
+    "pw 241", "gw 50", "sw 54", "lw 58",
+]
+intents = [12]
+
+[bag.pitching]
+clubs = ["pw 241", "gw 50", "sw 54", "lw 58"]
+intents = [9, 10, 11, 12]

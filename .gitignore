@@ -7,3 +7,5 @@ venv/
 PitchingData/
 Plot/
 SwingData/
+.pytest_cache/
+Output/
