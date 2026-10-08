@@ -84,7 +84,7 @@
       </div>
       <div class="kpis" id="sw-kpis"></div>
       <div class="table-wrap"><table id="sw-review"></table></div>
-      <p class="muted small">Changes are this session minus the earlier shots of the same club; ± is the 95% interval. A change is only called when that interval excludes zero (exact test for small samples).</p>
+      <p class="muted small">Historic is the earlier shots of the same club, as chosen under "Compare with" (only sessions ticked on the Sessions tab). Spread is the standard deviation (sd) of the shots; n is the number of historic shots.</p>
     </div>
 
     <div class="card">
@@ -92,14 +92,15 @@
         <h2>Progress</h2>
         <div class="controls">
           <label>Club <select id="sw-club"></select></label>
-          <label>Lower chart <select id="sw-metric">
-            <option value="carry_sd">Carry spread (sd)</option>
-            <option value="lat_sd">Lateral spread (sd)</option>
-            <option value="lat_mean">Lateral mean</option></select></label>
         </div>
       </div>
       <div id="sw-progress-1" class="plot short"></div>
       <div id="sw-progress-2" class="plot short"></div>
+      <div class="row between" style="margin-top:8px;margin-bottom:2px">
+        <span class="muted small">Any other measure per session (mean with 95% interval; spreads are standard deviations)</span>
+        <div class="controls"><label>Parameter <select id="sw-metric"></select></label></div>
+      </div>
+      <div id="sw-progress-3" class="plot short"></div>
     </div>
 
     <div class="card">

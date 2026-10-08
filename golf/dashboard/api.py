@@ -41,7 +41,7 @@ GET: Dict[str, Callable] = {
     "/api/state": _state,
     "/api/swing/overview": lambda s, q, b: service.swing_overview(s),
     "/api/swing/review": lambda s, q, b: service.swing_review(s, _first(q, "session"), q.get("baseline", "last4")),
-    "/api/swing/progress": lambda s, q, b: service.progress(s, "swing", _first(q, "label")),
+    "/api/swing/series": lambda s, q, b: service.series(s, "swing", _first(q, "label"), _first(q, "measure")),
     "/api/swing/dispersion": lambda s, q, b: service.dispersion(
         s, "swing", _first(q, "label"), _first(q, "session"), q.get("compare", "last4")),
     "/api/pitching/overview": lambda s, q, b: service.pitching_overview(s),

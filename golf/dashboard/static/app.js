@@ -57,10 +57,9 @@ function fillSelect(select, values, labels) {
 }
 
 function kpis(el, kpi) {
-  el.innerHTML = [
-    ["Shots", kpi.shots, ""], ["Clubs used", kpi.clubs, ""],
-    ["Tighter", kpi.tighter, "good"], ["Broader", kpi.broader, "bad"],
-  ].map(([name, value, cls]) => `<div class="kpi"><span>${name}</span><b class="${cls}">${value}</b></div>`).join("");
+  const all = [["Shots", kpi.shots, ""], ["Clubs used", kpi.clubs, ""], ["Tighter", kpi.tighter, "good"], ["Broader", kpi.broader, "bad"]];
+  el.innerHTML = all.filter(([, value]) => value !== undefined)
+    .map(([name, value, cls]) => `<div class="kpi"><span>${name}</span><b class="${cls}">${value}</b></div>`).join("");
 }
 
 function css(name) { return getComputedStyle(document.body).getPropertyValue(name).trim(); }
@@ -158,39 +157,56 @@ async function loadSwing() {
   fillSelect($("sw-disp-session"), o.sessions, o.sessions.map(dateLabel));
   fillSelect($("sw-club"), o.labels);
   fillSelect($("sw-disp-club"), o.labels);
+  fillMeasureMenu(o.measures);
   await Promise.all([swingReview(), swingProgress(), swingDispersion()]);
 }
 
+function fillMeasureMenu(measures) {
+  const select = $("sw-metric");
+  const previous = select.value;
+  const groups = [...new Set(measures.map((m) => m.group))];
+  select.innerHTML = groups.map((g) =>
+    `<optgroup label="${g}">` + measures.filter((m) => m.group === g).map((m) => `<option value="${m.key}">${m.title}</option>`).join("") + "</optgroup>").join("");
+  if (measures.some((m) => m.key === previous)) select.value = previous;
+}
+
 async function swingReview() {
-  if (!$("sw-session").value) { $("sw-review").innerHTML = ""; kpis($("sw-kpis"), { shots: 0, clubs: 0, tighter: 0, broader: 0 }); return; }
+  if (!$("sw-session").value) { $("sw-review").innerHTML = ""; kpis($("sw-kpis"), { shots: 0, clubs: 0 }); return; }
   const r = await api("/api/swing/review", { params: { session: $("sw-session").value, baseline: $("sw-baseline").value } });
-  kpis($("sw-kpis"), r.kpi);
+  kpis($("sw-kpis"), { shots: r.kpi.shots, clubs: r.kpi.clubs });
+  const history = (m, unit) => m.before.n ? `${num(m.before.mean)} ${unit}` : "–";
   const rows = r.rows.map((row) => {
     const c = row.measures.carry, l = row.measures.lateral;
-    return `<tr><td>${row.label}</td><td>${row.n}</td><td>${num(c.mean)} m</td><td>${change(c.d_mean, "m")}</td>` +
-      `<td>${num(c.sd)} m</td><td>${change(c.d_sd, "m", { colour: true })}</td>` +
-      `<td>${num(l.sd)} m</td><td>${change(l.d_sd, "m", { colour: true })}</td><td>${verdict(row.verdict)}</td></tr>`;
+    return `<tr><td>${row.label}</td><td>${row.n}</td>` +
+      `<td>${num(c.mean)} m</td><td>${num(c.sd)} m</td>` +
+      `<td>${history(c, "m")} <span class="pm">n=${c.before.n}</span></td><td>${c.before.n > 1 ? num(c.before.sd) + " m" : "–"}</td>` +
+      `<td>${num(l.sd)} m</td><td>${l.before.n > 1 ? num(l.before.sd) + " m" : "–"}</td></tr>`;
   }).join("");
-  $("sw-review").innerHTML = "<tr><th>Club</th><th>Shots</th><th>Mean carry</th><th>Mean vs before</th>" +
-    "<th>Carry spread (sd)</th><th>Spread vs before</th><th>Lateral spread (sd)</th><th>Spread vs before</th><th>Carry spread</th></tr>" +
-    (rows || '<tr><td colspan="9" class="muted">No shots for the selected clubs in this session.</td></tr>');
+  $("sw-review").innerHTML = "<tr><th>Club</th><th>Shots</th><th>Session mean carry</th><th>Session carry spread (sd)</th>" +
+    "<th>Historic carry</th><th>Historic carry spread (sd)</th><th>Session lateral spread (sd)</th><th>Historic lateral spread (sd)</th></tr>" +
+    (rows || '<tr><td colspan="8" class="muted">No shots for the selected clubs in this session.</td></tr>');
+}
+
+async function swingSeries(measure, id, color) {
+  const label = $("sw-club").value;
+  const d = await api("/api/swing/series", { params: { label, measure } });
+  if (!d.sessions.length) {
+    draw(id, [], baseLayout({ annotations: [{ text: "No data for this club", showarrow: false, font: { color: css("--muted") } }], xaxis: { visible: false }, yaxis: { visible: false } }));
+    return;
+  }
+  const s = d.sessions;
+  sessionChart(id, s.map((x) => x.date), [{
+    name: d.title, color, y: s.map((x) => x.y), lo: s.map((x) => x.lo), hi: s.map((x) => x.hi), n: s.map((x) => x.n),
+  }], { title: d.title, band: true });
 }
 
 async function swingProgress() {
-  const label = $("sw-club").value;
-  if (!label) return;
-  const d = await api("/api/swing/progress", { params: { label } });
-  const s = d.sessions, dates = s.map((x) => x.date), n = s.map((x) => x.n);
-  sessionChart("sw-progress-1", dates, [{ name: "Mean carry", color: "#378ADD", y: s.map((x) => x.carry_mean), lo: s.map((x) => x.carry_mean_lo), hi: s.map((x) => x.carry_mean_hi), n }],
-    { title: "Mean carry (m)", band: true });
-  const metric = $("sw-metric").value;
-  const spec = {
-    carry_sd: ["Carry spread, sd (m)", "carry_sd", "carry_sd_lo", "carry_sd_hi"],
-    lat_sd: ["Lateral spread, sd (m)", "lat_sd", "lat_sd_lo", "lat_sd_hi"],
-    lat_mean: ["Lateral mean (m, negative = left)", "lat_mean", "lat_mean_lo", "lat_mean_hi"],
-  }[metric];
-  sessionChart("sw-progress-2", dates, [{ name: spec[0], color: "#1D9E75", y: s.map((x) => x[spec[1]]), lo: s.map((x) => x[spec[2]]), hi: s.map((x) => x[spec[3]]), n }],
-    { title: spec[0], band: true });
+  if (!$("sw-club").value) return;
+  await Promise.all([
+    swingSeries("carry_mean", "sw-progress-1", "#378ADD"),
+    swingSeries("club_speed", "sw-progress-2", "#D4537E"),
+    swingSeries($("sw-metric").value, "sw-progress-3", "#1D9E75"),
+  ]);
 }
 
 function disperionTable(d) {

@@ -200,6 +200,7 @@ def review(state: AppState, mode: str, session: str, baseline: str, measures: Di
         for name, column in measures.items():
             cur, prev = now[column].dropna(), before[column].dropna()
             entry = _measure(now[column])
+            entry["before"] = _measure(before[column])
             entry["d_mean"] = _change(cur, prev, "mean", state)
             entry["d_sd"] = _change(cur, prev, "sd", state)
             row["measures"][name] = entry
@@ -221,7 +222,10 @@ def review(state: AppState, mode: str, session: str, baseline: str, measures: Di
 def swing_overview(state: AppState) -> Dict:
     df = state.selected("swing")
     labels = list(dict.fromkeys(df["label"])) if not df.empty else []
-    return clean({"sessions": sessions_of(df), "labels": labels, "loaded": state.shots["swing"] is not None})
+    return clean({
+        "sessions": sessions_of(df), "labels": labels, "loaded": state.shots["swing"] is not None,
+        "measures": series_menu(),
+    })
 
 
 def swing_review(state: AppState, session: str, baseline: str = "last4") -> Dict:
@@ -231,30 +235,49 @@ def swing_review(state: AppState, session: str, baseline: str = "last4") -> Dict
     )
 
 
-def progress(state: AppState, mode: str, label: str) -> Dict:
-    """Per session mean and spread of carry and lateral for one club, with 95% intervals."""
+# What the progress charts can show: key -> (column, statistic, title, group in the menu).
+# The first two are the fixed charts; the rest fill the pull-down menu of the third chart.
+SERIES = {
+    "carry_mean": ("carry_m", "mean", "Mean carry (m)", None),
+    "club_speed": ("club_speed_mph", "mean", "Club head speed (mph)", None),
+    "carry_sd": ("carry_m", "sd", "Carry spread, sd (m)", "Distribution"),
+    "lat_sd": ("lateral_m", "sd", "Lateral spread, sd (m)", "Distribution"),
+    "lat_mean": ("lateral_m", "mean", "Lateral mean (m, negative = left)", "Distribution"),
+    "ball_speed": ("ball_speed_mph", "mean", "Ball speed (mph)", "Ball flight"),
+    "smash": ("smash", "mean", "Smash factor", "Ball flight"),
+    "spin": ("spin_rpm", "mean", "Spin (rpm)", "Ball flight"),
+    "launch_v": ("launch_v_deg", "mean", "Launch angle (deg)", "Ball flight"),
+    "descent": ("descent_v_deg", "mean", "Descent angle (deg)", "Ball flight"),
+    "height": ("height_m", "mean", "Peak height (m)", "Ball flight"),
+    "flight_time": ("flight_time_s", "mean", "Flight time (s)", "Ball flight"),
+    "spin_axis": ("spin_axis_deg", "mean", "Spin axis (deg, negative = left)", "Ball flight"),
+    "aoa": ("aoa_deg", "mean", "Angle of attack (deg)", "Club"),
+    "club_path": ("club_path_deg", "mean", "Club path (deg, negative = left)", "Club"),
+    "dynamic_loft": ("dynamic_loft_deg", "mean", "Dynamic loft (deg)", "Club"),
+    "spin_loft": ("spin_loft_deg", "mean", "Spin loft (deg)", "Club"),
+}
+
+
+def series_menu() -> List[Dict]:
+    """The measures offered in the pull-down menu of the third progress chart."""
+    return [{"key": key, "title": title, "group": group} for key, (_, _, title, group) in SERIES.items() if group]
+
+
+def series(state: AppState, mode: str, label: str, measure: str) -> Dict:
+    """One measure per session for one club, with 95% intervals (mean or spread, see SERIES)."""
+    if measure not in SERIES:
+        raise ValueError(f"Unknown measure: {measure}")
+    column, kind, title, _ = SERIES[measure]
     df = state.selected(mode)
     if df.empty:
-        return {"label": label, "sessions": []}
+        return {"label": label, "title": title, "sessions": []}
     group = df[df["label"] == label]
-    level = state.config.stats.ci_level
-    carry = session_summary(group, "carry_m", by=["label"], level=level)
-    lateral = session_summary(group, "lateral_m", by=["label"], level=level).set_index("session_date")
-    sessions = []
-    for _, row in carry.iterrows():
-        lat = lateral.loc[row["session_date"]] if row["session_date"] in lateral.index else None
-        sessions.append({
-            "date": row["session_date"], "n": row["n"],
-            "carry_mean": row["mean"], "carry_mean_lo": row["mean_lo"], "carry_mean_hi": row["mean_hi"],
-            "carry_sd": row["sd"], "carry_sd_lo": row["sd_lo"], "carry_sd_hi": row["sd_hi"],
-            "lat_mean": None if lat is None else lat["mean"],
-            "lat_mean_lo": None if lat is None else lat["mean_lo"],
-            "lat_mean_hi": None if lat is None else lat["mean_hi"],
-            "lat_sd": None if lat is None else lat["sd"],
-            "lat_sd_lo": None if lat is None else lat["sd_lo"],
-            "lat_sd_hi": None if lat is None else lat["sd_hi"],
-        })
-    return clean({"label": label, "sessions": sessions})
+    summary = session_summary(group, column, by=["label"], level=state.config.stats.ci_level)
+    sessions = [{
+        "date": row["session_date"], "n": row["n"],
+        "y": row[kind], "lo": row[f"{kind}_lo"], "hi": row[f"{kind}_hi"],
+    } for _, row in summary.iterrows()]
+    return clean({"label": label, "title": title, "sessions": sessions})
 
 
 def _ring(x: np.ndarray, y: np.ndarray, coverage: float, state: AppState, grid: int = 90) -> List[List[float]]:

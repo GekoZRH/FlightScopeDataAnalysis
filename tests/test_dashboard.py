@@ -109,10 +109,42 @@ def test_first_session_has_nothing_to_compare_with(state):
     assert row["n_before"] == 0 and row["verdict"] is None
 
 
-def test_progress_has_one_point_per_session(state):
-    sessions = call(state, "/api/swing/progress", label="7i 245")["sessions"]
-    assert [s["date"] for s in sessions][0] == "2026-03-01" and len(sessions) == 6
-    assert all(s["carry_sd_lo"] < s["carry_sd"] < s["carry_sd_hi"] for s in sessions)
+def test_series_has_one_point_per_session(state):
+    d = call(state, "/api/swing/series", label="7i 245", measure="carry_sd")
+    assert d["title"].startswith("Carry spread") and [s["date"] for s in d["sessions"]][0] == "2026-03-01"
+    assert len(d["sessions"]) == 6 and all(s["lo"] < s["y"] < s["hi"] for s in d["sessions"])
+
+
+def test_series_fixed_charts_and_menu(state):
+    carry = call(state, "/api/swing/series", label="driver ping", measure="carry_mean")
+    speed = call(state, "/api/swing/series", label="driver ping", measure="club_speed")
+    assert carry["title"] == "Mean carry (m)" and speed["title"] == "Club head speed (mph)"
+    assert all(200 < p["y"] < 220 for p in carry["sessions"]) and all(95 < p["y"] < 105 for p in speed["sessions"])
+    menu = call(state, "/api/swing/overview")["measures"]
+    keys = [m["key"] for m in menu]
+    assert "carry_mean" not in keys and "club_speed" not in keys           # already shown as fixed charts
+    assert {"carry_sd", "lat_sd", "ball_speed", "spin", "descent", "height", "smash"} <= set(keys)
+    assert {m["group"] for m in menu} == {"Distribution", "Ball flight", "Club"}
+
+
+def test_series_for_a_measure_the_data_lacks_is_empty(state):
+    d = call(state, "/api/swing/series", label="driver ping", measure="spin")    # test files have no spin column
+    assert d["sessions"] == []
+
+
+def test_series_rejects_unknown_measures(state):
+    with pytest.raises(api.ApiError, match="Unknown measure"):
+        call(state, "/api/swing/series", label="driver ping", measure="not_a_measure")
+
+
+def test_review_reports_the_historic_shots_next_to_the_session(state):
+    rows = {r["label"]: r for r in call(state, "/api/swing/review", session="2026-04-05")["rows"]}
+    driver = rows["driver ping"]["measures"]
+    assert driver["carry"]["n"] == 12 and driver["carry"]["before"]["n"] == 48
+    assert driver["carry"]["before"]["mean"] == pytest.approx(210, abs=5)
+    assert driver["lateral"]["before"]["sd"] > 0
+    first = {r["label"]: r for r in call(state, "/api/swing/review", session="2026-03-01")["rows"]}
+    assert first["driver ping"]["measures"]["carry"]["before"]["n"] == 0
 
 
 @pytest.mark.parametrize("compare", ["last4", "all", "window"])
@@ -292,7 +324,7 @@ def test_only_the_selected_sessions_are_analysed(state):
     assert [s["date"] for s in listing["sessions"] if s["selected"]] == chosen
 
     assert call(state, "/api/swing/overview")["sessions"] == chosen
-    assert [s["date"] for s in call(state, "/api/swing/progress", label="driver ping")["sessions"]] == chosen[::-1]
+    assert [s["date"] for s in call(state, "/api/swing/series", label="driver ping", measure="carry_mean")["sessions"]] == chosen[::-1]
     newest = {r["label"]: r for r in call(state, "/api/swing/review", session=chosen[0], baseline="all")["rows"]}
     assert newest["driver ping"]["n_before"] == 24           # two earlier sessions of 12 shots, not five
     card = call(state, "/api/card", method="POST", mode="swing")
