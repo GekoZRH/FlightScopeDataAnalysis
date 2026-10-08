@@ -5,6 +5,17 @@ swing_dir = "SwingData/Indoor"
 pitching_dir = "PitchingData/Indoor"
 output_dir = "Output"
 
+[stats]
+window_weeks = 4          # printed card uses the shots of the last N weeks ...
+fallback_weeks = 12       # ... or of the last M weeks if that gives too few shots
+min_shots = 12            # shots per club/intent needed for meaningful statistics
+min_shots_skew = 25       # a skewed distribution is only considered from this many shots
+skew_alpha = 0.05         # ... and only if it fits significantly better than a normal one
+ci_level = 0.95
+n_bootstrap = 2000
+min_shots_compare = 8     # shots per period needed to call a change
+seed = 12345
+
 # Raw club labels are parsed into club / variant / intent.
 #   club    : driver, 3w, 4h, 8i, pw, gw, sw, lw ...
 #   variant : the specific club (245, 241, ping, ts2, 58 ...)

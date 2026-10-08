@@ -23,6 +23,21 @@ class BagSpec:
 
 
 @dataclass(frozen=True)
+class StatsSettings:
+    """Thresholds for the statistics. Defaults match golf.toml."""
+
+    window_weeks: int = 4          # recent window used for the printed card
+    fallback_weeks: int = 12       # wider window when the recent one has too few shots
+    min_shots: int = 12            # shots a club/intent needs for meaningful statistics
+    min_shots_skew: int = 25       # skew-normal is only considered from this many shots
+    skew_alpha: float = 0.05       # significance level of the skew-normal vs normal test
+    ci_level: float = 0.95
+    n_bootstrap: int = 2000
+    min_shots_compare: int = 8     # shots per period needed to compare two periods
+    seed: int = 12345
+
+
+@dataclass(frozen=True)
 class Config:
     root: Path
     swing_dir: Path
@@ -31,6 +46,7 @@ class Config:
     label_aliases: Dict[str, str] = field(default_factory=dict)
     variant_aliases: Dict[str, str] = field(default_factory=dict)
     bag: Dict[str, BagSpec] = field(default_factory=dict)
+    stats: StatsSettings = field(default_factory=StatsSettings)
 
     def data_dir(self, mode: str) -> Path:
         if mode == "swing":
@@ -70,4 +86,5 @@ def load_config(path: Optional[Path] = None) -> Config:
         label_aliases=dict(aliases.get("label", {})),
         variant_aliases=dict(aliases.get("variant", {})),
         bag=bag,
+        stats=StatsSettings(**raw.get("stats", {})),
     )

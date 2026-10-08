@@ -1,0 +1,273 @@
+from datetime import date, timedelta
+
+import numpy as np
+import pandas as pd
+import pytest
+from scipy import stats
+
+from golf.bag import select_bag
+from golf.config import StatsSettings, load_config
+from golf.data import load_shots
+from golf.stats import (
+    COVERAGE_1S, COVERAGE_2S, card_table, compare_groups, describe, fit_bivariate,
+    fit_univariate, mean_ci, rolling_sessions, sd_ci, select_window, session_summary,
+)
+
+SETTINGS = StatsSettings()
+
+
+# --- univariate ------------------------------------------------------------------
+
+def test_coverage_constants_match_one_and_two_sigma():
+    assert COVERAGE_1S == pytest.approx(0.682689, abs=1e-6)
+    assert COVERAGE_2S == pytest.approx(0.954500, abs=1e-6)
+
+
+def test_normal_ranges_are_mean_plus_minus_sigma():
+    x = np.random.default_rng(1).normal(100, 8, 60)
+    fit = fit_univariate(x)
+    lo, hi = fit.interval(COVERAGE_1S)
+    assert fit.kind == "normal"
+    assert lo == pytest.approx(x.mean() - x.std(ddof=1), abs=1e-6)
+    assert hi == pytest.approx(x.mean() + x.std(ddof=1), abs=1e-6)
+    lo2, hi2 = fit.interval(COVERAGE_2S)
+    assert hi2 - lo2 == pytest.approx(4 * x.std(ddof=1), abs=1e-6)
+
+
+def test_skew_is_detected_with_enough_shots():
+    x = stats.skewnorm.rvs(-6, loc=150, scale=12, size=400, random_state=3)   # mishits fall short
+    fit = fit_univariate(x)
+    lo, hi = fit.interval(COVERAGE_2S)
+    assert fit.kind == "skewnorm" and fit.shape < 0 and fit.p_skew < 0.05
+    assert fit.mean - lo > hi - fit.mean, "long tail towards short shots"
+
+
+def test_skew_is_not_fitted_to_few_shots():
+    x = stats.skewnorm.rvs(-6, loc=150, scale=12, size=15, random_state=3)
+    assert fit_univariate(x).kind == "normal"
+
+
+def test_normal_data_stays_normal():
+    kinds = [fit_univariate(np.random.default_rng(s).normal(0, 1, 60)).kind for s in range(40)]
+    assert kinds.count("skewnorm") <= 5            # about the 5% false-positive rate
+
+
+def test_constant_values_do_not_break_the_fit():
+    fit = fit_univariate([5.0, 5.0, 5.0])
+    assert fit.mean == 5.0 and fit.interval(COVERAGE_1S)[0] == pytest.approx(5.0, abs=1e-6)
+
+
+def test_too_few_values_raise():
+    with pytest.raises(ValueError):
+        fit_univariate([1.0])
+
+
+def test_prob_between():
+    fit = fit_univariate(np.random.default_rng(0).normal(50, 4, 200))
+    assert fit.prob_between(fit.mean - fit.sd, fit.mean + fit.sd) == pytest.approx(COVERAGE_1S, abs=1e-6)
+
+
+# --- bivariate -------------------------------------------------------------------
+
+def test_correlation_is_recovered():
+    rng = np.random.default_rng(5)
+    z = rng.multivariate_normal([0, 0], [[1, 0.6], [0.6, 1]], size=800)
+    fit = fit_bivariate(z[:, 0] * 3, 120 + z[:, 1] * 7)
+    assert fit.rho == pytest.approx(0.6, abs=0.06)
+
+
+def test_density_level_matches_the_normal_ellipse():
+    rng = np.random.default_rng(6)
+    x, y = rng.normal(0, 3, 500), rng.normal(100, 7, 500)
+    fit = fit_bivariate(x, y)
+    # for an uncorrelated normal, the region holding `c` of the shots ends at density (1-c)/(2*pi*sx*sy)
+    sx, sy = fit.x.sd, fit.y.sd
+    expected = (1 - 0.68) / (2 * np.pi * sx * sy * np.sqrt(1 - fit.rho ** 2))
+    assert fit.density_level(0.68) == pytest.approx(expected, rel=0.05)
+
+
+def test_bivariate_drops_incomplete_pairs():
+    fit = fit_bivariate([1, 2, np.nan, 4, 5], [10, 11, 12, np.nan, 14])
+    assert fit.x.n == 3
+
+
+# --- intervals -------------------------------------------------------------------
+
+@pytest.mark.parametrize("interval, truth", [(mean_ci, 100.0), (sd_ci, 8.0)])
+def test_small_sample_intervals_have_the_stated_coverage(interval, truth):
+    rng = np.random.default_rng(11)
+    hits = 0
+    runs = 1500
+    for _ in range(runs):
+        low, high = interval(rng.normal(100, 8, 8), 0.95)
+        hits += low <= truth <= high
+    assert 0.93 < hits / runs < 0.97
+
+
+def test_intervals_with_one_value_are_nan():
+    assert np.isnan(mean_ci([3.0])[0]) and np.isnan(sd_ci([3.0])[1])
+
+
+# --- comparing periods -----------------------------------------------------------
+
+def test_tighter_spread_is_detected():
+    rng = np.random.default_rng(2)
+    result = compare_groups(rng.normal(0, 1, 40), rng.normal(0, 2, 40))
+    assert result.direction == -1 and result.high < 1
+
+
+def test_no_change_is_not_called_a_change():
+    rng = np.random.default_rng(3)
+    result = compare_groups(rng.normal(0, 2, 40), rng.normal(0, 2, 40))
+    assert result.direction == 0 and result.low < 1 < result.high
+
+
+def test_too_few_shots_give_no_verdict():
+    assert compare_groups([1, 2, 3], [1, 2, 3, 4, 5, 6, 7, 8, 9]).direction is None
+
+
+def test_difference_of_means():
+    rng = np.random.default_rng(4)
+    result = compare_groups(rng.normal(110, 5, 50), rng.normal(100, 5, 50), np.mean, ratio=False)
+    assert result.direction == 1 and result.estimate == pytest.approx(10, abs=3)
+
+
+# --- windows ---------------------------------------------------------------------
+
+def make_shots(spec):
+    """spec: list of (label, days_ago, count); as-of day is 2026-06-30."""
+    base = date(2026, 6, 30)
+    rng = np.random.default_rng(0)
+    rows = []
+    for label, days_ago, count in spec:
+        day = base - timedelta(days=days_ago)
+        for i in range(count):
+            club, _, rest = label.partition(" ")
+            rows.append({
+                "label": label, "club": club, "variant": rest.split("_")[0], "intent": 12,
+                "session_date": day, "timestamp": pd.Timestamp(day) + pd.Timedelta(minutes=i),
+                "shot_index": i, "carry_m": 100 + rng.normal(0, 5), "lateral_m": rng.normal(0, 3),
+            })
+    return pd.DataFrame(rows)
+
+
+def test_recent_window_is_used_when_there_are_enough_shots():
+    shots = make_shots([("a 1", 0, 8), ("a 1", 20, 8), ("a 1", 60, 30)])
+    chosen = select_window(shots, SETTINGS)
+    assert set(chosen["window"]) == {"4w"} and len(chosen) == 16
+
+
+def test_falls_back_to_twelve_weeks():
+    shots = make_shots([("a 1", 0, 5), ("a 1", 40, 10), ("a 1", 100, 30)])
+    chosen = select_window(shots, SETTINGS)
+    assert set(chosen["window"]) == {"12w"} and len(chosen) == 15
+
+
+def test_uses_all_history_when_twelve_weeks_is_still_short():
+    shots = make_shots([("a 1", 0, 5), ("a 1", 40, 4), ("a 1", 100, 30)])
+    chosen = select_window(shots, SETTINGS)
+    assert set(chosen["window"]) == {"all"} and len(chosen) == 39 and set(chosen["window_weeks"]) == {0}
+
+
+def test_short_when_the_whole_history_has_too_few():
+    shots = make_shots([("a 1", 0, 5), ("a 1", 40, 4), ("a 1", 100, 2)])
+    chosen = select_window(shots, SETTINGS)
+    assert set(chosen["window"]) == {"short"} and len(chosen) == 11
+
+
+def test_window_edges_are_whole_days():
+    # a 4-week window ending on day 0 contains days 0..27; day 28 is already outside
+    shots = make_shots([("a 1", 0, 6), ("a 1", 27, 6), ("a 1", 28, 6)])
+    chosen = select_window(shots, SETTINGS)
+    assert set(chosen["window"]) == {"4w"} and len(chosen) == 12
+
+
+def test_as_of_defaults_to_the_latest_session():
+    shots = make_shots([("a 1", 10, 12), ("a 1", 40, 12)])
+    chosen = select_window(shots, SETTINGS)
+    assert set(chosen["as_of"]) == {date(2026, 6, 20)} and set(chosen["window"]) == {"4w"}
+
+
+def test_each_club_chooses_its_own_window():
+    shots = make_shots([("a 1", 0, 14), ("b 2", 0, 3), ("b 2", 50, 12)])
+    chosen = select_window(shots, SETTINGS).groupby("label")["window"].first().to_dict()
+    assert chosen == {"a 1": "4w", "b 2": "12w"}
+
+
+def test_shots_without_measurements_are_not_counted():
+    shots = make_shots([("a 1", 0, 14)])
+    shots.loc[:5, "carry_m"] = np.nan
+    assert len(select_window(shots, SETTINGS)) == 8
+
+
+def test_as_of_excludes_later_sessions():
+    shots = make_shots([("a 1", 0, 12), ("a 1", 30, 12)])
+    chosen = select_window(shots, SETTINGS, as_of=date(2026, 6, 1))
+    assert set(chosen["session_date"]) == {date(2026, 5, 31)}
+
+
+# --- per session -----------------------------------------------------------------
+
+def test_session_summary_values():
+    shots = make_shots([("a 1", 0, 10), ("a 1", 7, 6)])
+    summary = session_summary(shots, "carry_m")
+    assert len(summary) == 2
+    last = summary.iloc[-1]
+    group = shots[shots["session_date"] == last["session_date"]]["carry_m"]
+    assert last["n"] == 10 and last["mean"] == pytest.approx(group.mean())
+    assert last["sd"] == pytest.approx(group.std(ddof=1))
+    assert last["sd_lo"] < last["sd"] < last["sd_hi"]
+
+
+def test_session_with_one_shot_has_no_spread():
+    summary = session_summary(make_shots([("a 1", 0, 1)]), "carry_m")
+    assert np.isnan(summary["sd"].iloc[0]) and np.isnan(summary["sd_lo"].iloc[0])
+
+
+def test_rolling_pools_the_last_sessions():
+    shots = make_shots([("a 1", 21, 5), ("a 1", 14, 5), ("a 1", 7, 5), ("a 1", 0, 5)])
+    rolling = rolling_sessions(shots, "carry_m", window_sessions=3)
+    assert rolling["n"].tolist() == [5, 10, 15, 15]
+    assert rolling["sessions_in_window"].tolist() == [1, 2, 3, 3]
+
+
+# --- card ------------------------------------------------------------------------
+
+def test_describe_reports_nan_for_too_few_shots():
+    result = describe([4.0], SETTINGS)
+    assert result["n"] == 1 and np.isnan(result["mean"])
+
+
+def test_card_table_columns_and_status():
+    shots = make_shots([("a 1", 0, 14), ("b 2", 0, 3), ("c 3", 0, 4), ("c 3", 200, 20)])
+    card = card_table(shots, SETTINGS).set_index("label")
+    assert card.loc["a 1", "status"] == "ok" and card.loc["b 2", "status"] == "short"
+    assert card.loc["c 3", "status"] == "history" and card.loc["c 3", "window"] == "all" and card.loc["c 3", "n"] == 24
+    assert card.loc["a 1", "carry_lo68"] < card.loc["a 1", "carry_mean"] < card.loc["a 1", "carry_hi68"]
+    assert card.loc["a 1", "carry_lo95"] < card.loc["a 1", "carry_lo68"]
+    assert card.loc["a 1", "n"] == 14
+
+
+def test_card_rows_follow_the_order_of_the_input():
+    shots = make_shots([("z 9", 0, 12), ("a 1", 0, 12), ("m 5", 0, 12)])
+    assert card_table(shots, SETTINGS)["label"].tolist() == ["z 9", "a 1", "m 5"]
+
+
+# --- real data -------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def real():
+    config = load_config()
+    if not any(config.swing_dir.glob("*.csv")):
+        pytest.skip("real data not available")
+    return config
+
+
+@pytest.mark.parametrize("mode", ["swing", "pitching"])
+def test_card_on_real_data(real, mode):
+    shots = select_bag(load_shots(mode, real), real.bag[mode])
+    card = card_table(shots, real.stats)
+    assert not card.empty
+    usable = card[card["status"] != "short"]
+    assert (usable["carry_lo95"] < usable["carry_lo68"]).all() and (usable["carry_hi68"] < usable["carry_hi95"]).all()
+    assert (usable["n"] >= real.stats.min_shots).all()
