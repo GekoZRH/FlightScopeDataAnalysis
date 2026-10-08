@@ -10,7 +10,7 @@ from golf.config import StatsSettings, load_config
 from golf.data import load_shots
 from golf.stats import (
     COVERAGE_1S, COVERAGE_2S, card_table, compare_groups, describe, fit_bivariate,
-    fit_univariate, mean_ci, rolling_sessions, sd_ci, select_window, session_summary,
+    fit_univariate, mean_ci, rolling_sessions, sd_ci, session_summary,
 )
 
 SETTINGS = StatsSettings()
@@ -132,7 +132,7 @@ def test_difference_of_means():
     assert result.direction == 1 and result.estimate == pytest.approx(10, abs=3)
 
 
-# --- windows ---------------------------------------------------------------------
+# --- test data ---------------------------------------------------------------------
 
 def make_shots(spec):
     """spec: list of (label, days_ago, count); as-of day is 2026-06-30."""
@@ -149,61 +149,6 @@ def make_shots(spec):
                 "shot_index": i, "carry_m": 100 + rng.normal(0, 5), "lateral_m": rng.normal(0, 3),
             })
     return pd.DataFrame(rows)
-
-
-def test_recent_window_is_used_when_there_are_enough_shots():
-    shots = make_shots([("a 1", 0, 8), ("a 1", 20, 8), ("a 1", 60, 30)])
-    chosen = select_window(shots, SETTINGS)
-    assert set(chosen["window"]) == {"4w"} and len(chosen) == 16
-
-
-def test_falls_back_to_twelve_weeks():
-    shots = make_shots([("a 1", 0, 5), ("a 1", 40, 10), ("a 1", 100, 30)])
-    chosen = select_window(shots, SETTINGS)
-    assert set(chosen["window"]) == {"12w"} and len(chosen) == 15
-
-
-def test_uses_all_history_when_twelve_weeks_is_still_short():
-    shots = make_shots([("a 1", 0, 5), ("a 1", 40, 4), ("a 1", 100, 30)])
-    chosen = select_window(shots, SETTINGS)
-    assert set(chosen["window"]) == {"all"} and len(chosen) == 39 and set(chosen["window_weeks"]) == {0}
-
-
-def test_short_when_the_whole_history_has_too_few():
-    shots = make_shots([("a 1", 0, 5), ("a 1", 40, 4), ("a 1", 100, 2)])
-    chosen = select_window(shots, SETTINGS)
-    assert set(chosen["window"]) == {"short"} and len(chosen) == 11
-
-
-def test_window_edges_are_whole_days():
-    # a 4-week window ending on day 0 contains days 0..27; day 28 is already outside
-    shots = make_shots([("a 1", 0, 6), ("a 1", 27, 6), ("a 1", 28, 6)])
-    chosen = select_window(shots, SETTINGS)
-    assert set(chosen["window"]) == {"4w"} and len(chosen) == 12
-
-
-def test_as_of_defaults_to_the_latest_session():
-    shots = make_shots([("a 1", 10, 12), ("a 1", 40, 12)])
-    chosen = select_window(shots, SETTINGS)
-    assert set(chosen["as_of"]) == {date(2026, 6, 20)} and set(chosen["window"]) == {"4w"}
-
-
-def test_each_club_chooses_its_own_window():
-    shots = make_shots([("a 1", 0, 14), ("b 2", 0, 3), ("b 2", 50, 12)])
-    chosen = select_window(shots, SETTINGS).groupby("label")["window"].first().to_dict()
-    assert chosen == {"a 1": "4w", "b 2": "12w"}
-
-
-def test_shots_without_measurements_are_not_counted():
-    shots = make_shots([("a 1", 0, 14)])
-    shots.loc[:5, "carry_m"] = np.nan
-    assert len(select_window(shots, SETTINGS)) == 8
-
-
-def test_as_of_excludes_later_sessions():
-    shots = make_shots([("a 1", 0, 12), ("a 1", 30, 12)])
-    chosen = select_window(shots, SETTINGS, as_of=date(2026, 6, 1))
-    assert set(chosen["session_date"]) == {date(2026, 5, 31)}
 
 
 # --- per session -----------------------------------------------------------------
@@ -242,10 +187,34 @@ def test_card_table_columns_and_status():
     shots = make_shots([("a 1", 0, 14), ("b 2", 0, 3), ("c 3", 0, 4), ("c 3", 200, 20)])
     card = card_table(shots, SETTINGS).set_index("label")
     assert card.loc["a 1", "status"] == "ok" and card.loc["b 2", "status"] == "short"
-    assert card.loc["c 3", "status"] == "history" and card.loc["c 3", "window"] == "all" and card.loc["c 3", "n"] == 24
+    assert card.loc["c 3", "status"] == "ok" and card.loc["c 3", "n"] == 24     # all given shots are used
     assert card.loc["a 1", "carry_lo68"] < card.loc["a 1", "carry_mean"] < card.loc["a 1", "carry_hi68"]
     assert card.loc["a 1", "carry_lo95"] < card.loc["a 1", "carry_lo68"]
     assert card.loc["a 1", "n"] == 14
+
+
+def test_card_table_describes_the_span_of_the_selection():
+    shots = make_shots([("a 1", 0, 12), ("a 1", 21, 12), ("b 2", 7, 12)])
+    card = card_table(shots, SETTINGS)
+    assert set(card["sessions"]) == {3} and set(card["as_of"]) == {date(2026, 6, 30)} and set(card["from"]) == {date(2026, 6, 9)}
+
+
+def test_card_table_can_stop_at_a_date():
+    shots = make_shots([("a 1", 0, 12), ("a 1", 21, 12)])
+    card = card_table(shots, SETTINGS, as_of=date(2026, 6, 20))
+    assert card["n"].tolist() == [12] and card["as_of"].iloc[0] == date(2026, 6, 9)
+
+
+def test_card_table_ignores_shots_without_measurements():
+    shots = make_shots([("a 1", 0, 14)])
+    shots.loc[:5, "carry_m"] = np.nan
+    assert card_table(shots, SETTINGS)["n"].tolist() == [8]
+
+
+def test_card_table_of_nothing_is_empty():
+    shots = make_shots([("a 1", 0, 3)])
+    shots["carry_m"] = np.nan
+    assert card_table(shots, SETTINGS).empty
 
 
 def test_card_rows_follow_the_order_of_the_input():
@@ -268,9 +237,8 @@ def test_card_on_real_data(real, mode):
     shots = select_bag(load_shots(mode, real), real.bag[mode])
     card = card_table(shots, real.stats)
     assert not card.empty
-    usable = card[card["status"] != "short"]
-    assert (usable["carry_lo95"] < usable["carry_lo68"]).all() and (usable["carry_hi68"] < usable["carry_hi95"]).all()
-    assert (usable["n"] >= real.stats.min_shots).all()
+    assert (card["carry_lo95"] < card["carry_lo68"]).all() and (card["carry_hi68"] < card["carry_hi95"]).all()
+    assert (card[card["status"] == "ok"]["n"] >= real.stats.min_shots).all()
 
 
 # --- exact small-sample comparison ---------------------------------------------------

@@ -16,6 +16,7 @@ from golf.bag import unlisted_clubs
 from golf.config import load_config
 from golf.data import load_shots, unparsed_labels
 from golf.report.build import CARDS, generate_card
+from golf.sessions import include_sessions
 
 
 def build_cards(as_of: Optional[date] = None, config_path: Optional[Path] = None) -> List[Path]:
@@ -25,15 +26,16 @@ def build_cards(as_of: Optional[date] = None, config_path: Optional[Path] = None
     for mode in CARDS:
         shots = load_shots(mode, config)
         report_problems(mode, shots, config)
+        shots = include_sessions(shots, config.excluded_sessions.get(mode, ()))
         try:
             paths, card = generate_card(mode, shots, config, as_of)
         except ValueError as error:
             print(f"[{mode}] {error}")
             continue
         written.extend(paths)
-        print(f"[{mode}] card up to {card['as_of'].iloc[0]}: {len(card)} rows -> {paths[0]}")
+        print(f"[{mode}] card from {card['sessions'].iloc[0]} sessions up to {card['as_of'].iloc[0]}: {len(card)} rows -> {paths[0]}")
         for _, row in card[card["status"] != "ok"].iterrows():
-            print(f"    {row['label']}: {row['status']} (n={row['n']}, window {row['window']})")
+            print(f"    {row['label']}: only {row['n']} shots")
     return written
 
 

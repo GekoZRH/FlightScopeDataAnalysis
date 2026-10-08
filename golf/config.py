@@ -59,9 +59,9 @@ class CardSpec:
 class StatsSettings:
     """Thresholds for the statistics. Defaults match golf.toml."""
 
-    window_weeks: int = 4          # recent window used for the printed card
-    fallback_weeks: int = 12       # wider window when the recent one has too few shots
-    min_shots: int = 12            # shots a club/intent needs for meaningful statistics
+    window_weeks: int = 4          # "last N weeks" quick selection on the Sessions tab
+    fallback_weeks: int = 12       # second quick selection
+    min_shots: int = 12            # shots a club/intent needs on the card for meaningful statistics
     min_shots_skew: int = 25       # skew-normal is only considered from this many shots
     skew_alpha: float = 0.05       # significance level of the skew-normal vs normal test
     ci_level: float = 0.95
@@ -83,6 +83,7 @@ class Config:
     stats: StatsSettings = field(default_factory=StatsSettings)
     cards: Dict[str, CardSpec] = field(default_factory=dict)
     default_bag: Dict[str, BagSpec] = field(default_factory=dict)   # golf.toml, before local choices
+    excluded_sessions: Dict[str, frozenset] = field(default_factory=dict)   # mode -> session dates left out
     local_path: Optional[Path] = None
 
     def data_dir(self, mode: str) -> Path:
@@ -161,10 +162,18 @@ def load_config(path: Optional[Path] = None, local_path: Optional[Path] = None) 
         preferred = default_bag.get("pitching", BagSpec(clubs=())).clubs
         bag["pitching"] = BagSpec.from_pairs(pairs, preferred)
 
+    swing_dir = root / local.get("swing_dir", paths["swing_dir"])
+    pitching_dir = root / local.get("pitching_dir", paths["pitching_dir"])
+    # Sessions left out are remembered per data folder, so another folder starts with all sessions.
+    excluded = {
+        mode: frozenset(local.get("sessions", {}).get(mode, {}).get(str(folder), {}).get("excluded", []))
+        for mode, folder in (("swing", swing_dir), ("pitching", pitching_dir))
+    }
+
     return Config(
         root=root,
-        swing_dir=root / local.get("swing_dir", paths["swing_dir"]),
-        pitching_dir=root / local.get("pitching_dir", paths["pitching_dir"]),
+        swing_dir=swing_dir,
+        pitching_dir=pitching_dir,
         output_dir=root / paths["output_dir"],
         label_aliases=dict(aliases.get("label", {})),
         variant_aliases=dict(aliases.get("variant", {})),
@@ -172,6 +181,7 @@ def load_config(path: Optional[Path] = None, local_path: Optional[Path] = None) 
         stats=StatsSettings(**raw.get("stats", {})),
         cards=cards,
         default_bag=default_bag,
+        excluded_sessions=excluded,
         local_path=local_path,
     )
 

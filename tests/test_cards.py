@@ -14,7 +14,7 @@ def make_card(statuses):
     for i, (label, status) in enumerate(statuses):
         mean = 200 - 20 * i
         rows.append({
-            "label": label, "status": status, "window": "4w", "n": 15, "as_of": "2026-10-03",
+            "label": label, "status": status, "window": "4w", "n": 15, "sessions": 3, "from": "2026-03-01", "as_of": "2026-10-03",
             "carry_mean": mean, "carry_lo68": mean - 5, "carry_hi68": mean + 5,
             "carry_lo95": mean - 10, "carry_hi95": mean + 10, "roll_mean": 1.5,
         })
@@ -26,10 +26,10 @@ def texts(fig):
 
 
 def test_card_marks_older_data_with_an_asterisk():
-    card = make_card([("driver ping", "ok"), ("7i 245", "history"), ("pw 241", "short")])
+    card = make_card([("driver ping", "ok"), ("7i 245", "short"), ("pw 241", "ok")])
     fig = draw_distance_card(card, CardSpec(title="Test"), SETTINGS)
     labels = [t.get_text() for t in fig.axes[0].get_yticklabels()]
-    assert labels == ["driver ping", "7i 245*", "pw 241**"]
+    assert labels == ["driver ping", "7i 245*", "pw 241"]
 
 
 def test_first_row_is_at_the_top():
@@ -52,9 +52,16 @@ def test_roll_only_when_requested():
 
 
 def test_footnote_explains_only_the_markers_in_use():
-    fig = draw_distance_card(make_card([("a 1", "ok"), ("b 2", "history")]), CardSpec(title="T"), SETTINGS)
-    note = " ".join(t.get_text() for t in fig.texts)
-    assert "* fewer than" in note and "** fewer than" not in note
+    short = draw_distance_card(make_card([("a 1", "ok"), ("b 2", "short")]), CardSpec(title="T"), SETTINGS)
+    assert "* fewer than 12 shots" in " ".join(t.get_text() for t in short.texts)
+    fine = draw_distance_card(make_card([("a 1", "ok")]), CardSpec(title="T"), SETTINGS)
+    assert "fewer than" not in " ".join(t.get_text() for t in fine.texts)
+
+
+def test_title_names_the_sessions_used():
+    card = make_card([("a 1", "ok")])
+    title = draw_distance_card(card, CardSpec(title="Card"), SETTINGS).axes[0].get_title()
+    assert title == "Card  (3 sessions, 2026-03-01 to 2026-10-03)"
 
 
 def test_notes_are_drawn():

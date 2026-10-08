@@ -122,7 +122,8 @@ async function renderDatasets(datasets) {
     const d = datasets[mode];
     $(mode === "swing" ? "swing-dir" : "pitching-dir").value = d.folder;
     if (!d.loaded) { parts.push(`${label}: not loaded (${d.error || "no data"})`); continue; }
-    parts.push(`${label}: ${d.files} files, ${d.shots.toLocaleString()} shots, ${d.sessions} sessions, last ${dateLabel(d.last_session)}`);
+    const used = d.sessions_selected === d.sessions ? `${d.sessions} sessions` : `${d.sessions_selected} of ${d.sessions} sessions selected`;
+    parts.push(`${label}: ${d.files} files, ${d.shots.toLocaleString()} shots, ${used}, last ${dateLabel(d.last_session)}`);
     if (d.not_in_bag.length) {
       const list = d.not_in_bag.map((c) => `${c.club_variant} (${c.shots} shots)`).join(", ");
       warnings.push(`${label}: ${d.not_in_bag.length} club(s) recorded but not selected: ${list}. Choose them in the ${tab} tab.`);
@@ -273,15 +274,15 @@ async function pitchingStraightness() {
   const d = await api("/api/pitching/straightness");
   const key = { sd: (r) => r.sd, offset: (r) => Math.abs(r.mean), rms: (r) => r.rms }[$("pt-sort").value];
   const rows = d.rows.filter((r) => r.n > 1).sort((a, b) => key(a) - key(b));
-  const names = rows.map((r) => r.label + (r.window === "all" || r.window === "short" ? "*" : ""));
+  const names = rows.map((r) => r.label + (r.short ? "*" : ""));
   const bars = (lo, hi) => ({ x: rows.flatMap((r) => [r[lo], r[hi], null]), y: names.flatMap((n) => [n, n, null]) });
   const accent = "#378ADD";
   const traces = [
     Object.assign(bars("lo95", "hi95"), { mode: "lines", line: { color: rgba(accent, 0.3), width: 14 }, hoverinfo: "skip", showlegend: false }),
     Object.assign(bars("lo68", "hi68"), { mode: "lines", line: { color: accent, width: 14 }, hoverinfo: "skip", showlegend: false }),
     { x: rows.map((r) => r.mean), y: names, mode: "markers", marker: { color: css("--surface"), size: 9, line: { color: accent, width: 2 } },
-      customdata: rows.map((r) => [r.n, r.sd, r.window]), showlegend: false,
-      hovertemplate: "mean %{x:.1f} m, sd %{customdata[1]:.1f} m (n=%{customdata[0]}, window %{customdata[2]})<extra></extra>" },
+      customdata: rows.map((r) => [r.n, r.sd]), showlegend: false,
+      hovertemplate: "mean %{x:.1f} m, sd %{customdata[1]:.1f} m (n=%{customdata[0]})<extra></extra>" },
   ];
   $("pt-straight").style.height = Math.max(240, 44 * rows.length + 70) + "px";
   draw("pt-straight", traces, baseLayout({
@@ -295,10 +296,76 @@ async function pitchingLadder() {
   const target = parseFloat($("pt-target").value), tol = parseFloat($("pt-tol").value);
   if (!(target > 0) || !(tol > 0)) return;
   const d = await api("/api/pitching/ladder", { params: { target, tolerance: tol } });
-  const rows = d.rows.map((r, i) => `<tr><td>${r.label}${i === 0 ? ' <span class="pill good">best</span>' : ""}${r.window === "all" ? "*" : ""}</td>` +
+  const rows = d.rows.map((r, i) => `<tr><td>${r.label}${i === 0 ? ' <span class="pill good">best</span>' : ""}${r.short ? "*" : ""}</td>` +
     `<td>${r.n}</td><td>${num(r.mean, 0)} m</td><td>${num(r.sd)} m</td><td>${num(r.lat_sd)} m</td><td>${Math.round(r.chance * 100)}%</td></tr>`).join("");
   $("pt-ladder").innerHTML = `<tr><th>Option</th><th>Shots</th><th>Mean carry</th><th>Carry spread (sd)</th><th>Lateral spread (sd)</th><th>Chance within ±${tol} m</th></tr>` +
     (rows || '<tr><td colspan="6" class="muted">No wedge has enough shots.</td></tr>');
+}
+
+// ---------------------------------------------------------------- sessions
+
+const sessionRows = { swing: [], pitching: [] };
+const sessionWeeks = { window: 4, fallback: 12 };
+const sessionTimer = {};
+
+async function loadSessions() {
+  for (const mode of ["swing", "pitching"]) {
+    const d = await api("/api/sessions", { params: { mode } });
+    sessionRows[mode] = d.sessions;
+    if (d.loaded) { sessionWeeks.window = d.window_weeks; sessionWeeks.fallback = d.fallback_weeks; }
+    renderSessions(mode);
+  }
+  for (const mode of ["swing", "pitching"]) {
+    $(`ss-${mode}-w1`).textContent = `Last ${sessionWeeks.window} weeks`;
+    $(`ss-${mode}-w2`).textContent = `Last ${sessionWeeks.fallback} weeks`;
+  }
+}
+
+function renderSessions(mode) {
+  const rows = sessionRows[mode];
+  const chosen = rows.filter((r) => r.selected);
+  const shots = chosen.reduce((sum, r) => sum + r.shots, 0);
+  $(`ss-${mode}-summary`).textContent = rows.length
+    ? `${chosen.length} of ${rows.length} sessions selected, ${shots.toLocaleString()} shots`
+    : "No data loaded.";
+  const body = rows.map((r) =>
+    `<tr><td><input type="checkbox" data-mode="${mode}" data-date="${r.date}"${r.selected ? " checked" : ""}></td>` +
+    `<td>${dateLabel(r.date)}</td><td>${r.shots}</td><td>${r.clubs}</td><td class="muted">${r.files.join(", ")}</td></tr>`).join("");
+  $(`ss-${mode}-table`).innerHTML = "<tr><th></th><th>Session</th><th>Shots</th><th>Clubs and intents</th><th>File</th></tr>" + body;
+}
+
+function applySelection(mode, predicate) {
+  sessionRows[mode].forEach((r) => (r.selected = predicate(r)));
+  renderSessions(mode);
+  saveSessions(mode);
+}
+
+function saveSessions(mode) {
+  clearTimeout(sessionTimer[mode]);
+  sessionTimer[mode] = setTimeout(guard(async () => {
+    const selected = sessionRows[mode].filter((r) => r.selected).map((r) => r.date);
+    if (!selected.length) { showError("Select at least one session."); return; }
+    const d = await api("/api/sessions", { body: { mode, selected } });
+    sessionRows[mode] = d.sessions;
+    renderSessions(mode);
+    const state = await api("/api/state");
+    await renderDatasets(state.datasets);
+  }), 300);
+}
+
+function sessionPreset(mode, preset) {
+  const rows = sessionRows[mode];
+  if (!rows.length) return;
+  const latest = new Date(rows[0].date + "T12:00:00");
+  const withinWeeks = (weeks) => (r) => (latest - new Date(r.date + "T12:00:00")) / 86400000 < weeks * 7;
+  if (preset === "all") applySelection(mode, () => true);
+  else if (preset === "weeks1") applySelection(mode, withinWeeks(sessionWeeks.window));
+  else if (preset === "weeks2") applySelection(mode, withinWeeks(sessionWeeks.fallback));
+  else if (preset === "lastn") {
+    const n = Math.max(1, parseInt($(`ss-${mode}-n`).value, 10) || 1);
+    const newest = new Set(rows.slice(0, n).map((r) => r.date));
+    applySelection(mode, (r) => newest.has(r.date));
+  }
 }
 
 // ---------------------------------------------------------------- bag and wedge selection
@@ -368,8 +435,9 @@ async function makeCard(mode, prefix) {
   $(prefix + "-card-msg").textContent = "Drawing the card…";
   try {
     const r = await api("/api/card", { body: { mode } });
-    const flagged = r.flagged.length ? ` Older data (*): ${r.flagged.map((f) => f.label).join(", ")}.` : "";
-    $(prefix + "-card-msg").textContent = `Saved ${r.file} (shots up to ${dateLabel(r.as_of)}, ${r.rows} rows). A dated copy is in the archive folder.${flagged}`;
+    const flagged = r.flagged.length ? ` Fewer than 12 shots (*): ${r.flagged.map((f) => `${f.label} (${f.n})`).join(", ")}.` : "";
+    const span = r.from === r.as_of ? dateLabel(r.as_of) : `${dateLabel(r.from)} to ${dateLabel(r.as_of)}`;
+    $(prefix + "-card-msg").textContent = `Saved ${r.file} (${r.sessions} session${r.sessions === 1 ? "" : "s"}, ${span}, ${r.rows} rows). A dated copy is in the archive folder.${flagged}`;
     const image = $(prefix + "-card-img");
     image.src = r.url + "?t=" + Date.now();
     image.hidden = false;
@@ -380,7 +448,7 @@ async function makeCard(mode, prefix) {
 
 // ---------------------------------------------------------------- tabs and start
 
-const refreshers = { swing: loadSwing, pitching: loadPitching, bag: loadBag, wedges: loadWedges };
+const refreshers = { sessions: loadSessions, swing: loadSwing, pitching: loadPitching, bag: loadBag, wedges: loadWedges };
 
 async function showTab(name) {
   currentTab = name;
@@ -417,6 +485,18 @@ function wire() {
     renderBag();
   });
   $("bag-save").addEventListener("click", guard(saveBag));
+
+  document.querySelectorAll("#tab-sessions .controls button[data-preset]").forEach((button) => {
+    button.addEventListener("click", () => sessionPreset(button.closest(".controls").dataset.mode, button.dataset.preset));
+  });
+  $("tab-sessions").addEventListener("change", (event) => {
+    const box = event.target;
+    if (box.type !== "checkbox") return;
+    const row = sessionRows[box.dataset.mode].find((r) => r.date === box.dataset.date);
+    row.selected = box.checked;
+    renderSessions(box.dataset.mode);
+    saveSessions(box.dataset.mode);
+  });
 
   $("wedge-grid").addEventListener("click", (event) => {
     const chip = event.target.closest(".chip");

@@ -6,9 +6,9 @@ pitching_dir = "PitchingData/Indoor"
 output_dir = "Output"
 
 [stats]
-window_weeks = 4          # printed card uses the shots of the last N weeks ...
-fallback_weeks = 12       # ... or of the last M weeks if that gives too few shots
-min_shots = 12            # shots per club/intent needed for meaningful statistics
+window_weeks = 4          # Sessions tab: quick button 'Last 4 weeks'
+fallback_weeks = 12       # Sessions tab: quick button 'Last 12 weeks'
+min_shots = 12            # shots per club/intent on a card needed for meaningful statistics (else marked *)
 min_shots_skew = 25       # a skewed distribution is only considered from this many shots
 skew_alpha = 0.05         # ... and only if it fits significantly better than a normal one
 ci_level = 0.95

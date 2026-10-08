@@ -29,12 +29,47 @@
   </header>
 
   <nav class="tabs" role="tablist">
+    <button class="tab" data-tab="sessions" role="tab">Sessions</button>
     <button class="tab on" data-tab="swing" role="tab">Full swing</button>
     <button class="tab" data-tab="pitching" role="tab">Pitching</button>
     <span class="grow"></span>
     <button class="tab" data-tab="bag" role="tab">Bag</button>
     <button class="tab" data-tab="wedges" role="tab">Wedge intents</button>
   </nav>
+
+  <section id="tab-sessions" hidden>
+    <div class="card">
+      <div class="row between">
+        <div>
+          <h2>Full swing sessions</h2>
+          <p class="muted small" id="ss-swing-summary"></p>
+        </div>
+        <div class="controls" data-mode="swing">
+          <button type="button" data-preset="all">All</button>
+          <button type="button" data-preset="weeks1" id="ss-swing-w1">Last 4 weeks</button>
+          <button type="button" data-preset="weeks2" id="ss-swing-w2">Last 12 weeks</button>
+          <label>Last <input type="number" min="1" value="4" id="ss-swing-n"> sessions <button type="button" data-preset="lastn">Select</button></label>
+        </div>
+      </div>
+      <div class="table-wrap"><table id="ss-swing-table"></table></div>
+    </div>
+    <div class="card">
+      <div class="row between">
+        <div>
+          <h2>Pitching sessions</h2>
+          <p class="muted small" id="ss-pitching-summary"></p>
+        </div>
+        <div class="controls" data-mode="pitching">
+          <button type="button" data-preset="all">All</button>
+          <button type="button" data-preset="weeks1" id="ss-pitching-w1">Last 4 weeks</button>
+          <button type="button" data-preset="weeks2" id="ss-pitching-w2">Last 12 weeks</button>
+          <label>Last <input type="number" min="1" value="4" id="ss-pitching-n"> sessions <button type="button" data-preset="lastn">Select</button></label>
+        </div>
+      </div>
+      <div class="table-wrap"><table id="ss-pitching-table"></table></div>
+    </div>
+    <p class="muted small">Only the ticked sessions are used everywhere: the reviews, the earlier sessions they are compared with, the progress charts, and the printed cards. Changes apply at once and are remembered for this data folder. Sessions you add to the folder later are ticked automatically. The "last weeks" buttons count back from the newest session.</p>
+  </section>
 
   <section id="tab-swing">
     <div class="card">
@@ -75,8 +110,7 @@
           <label>Session <select id="sw-disp-session"></select></label>
           <label>Compare with <select id="sw-disp-compare">
             <option value="last4">last 4 sessions</option>
-            <option value="all">all earlier sessions</option>
-            <option value="window">card window</option></select></label>
+            <option value="all">all earlier sessions</option></select></label>
         </div>
       </div>
       <div class="split">
@@ -87,7 +121,7 @@
 
     <div class="card">
       <div class="row between">
-        <div><h2>Printed card</h2><p class="muted small">Built from the clubs ticked in the Bag tab, driver on top. Saved in the Output folder.</p></div>
+        <div><h2>Printed card</h2><p class="muted small">Built from all shots of the sessions selected on the Sessions tab, for the clubs ticked in the Bag tab, driver on top.</p></div>
         <button id="sw-card" type="button" class="primary">Generate swing card</button>
       </div>
       <div class="muted" id="sw-card-msg"></div>
@@ -138,7 +172,7 @@
         </div>
       </div>
       <div id="pt-straight" class="plot tall"></div>
-      <p class="muted small">Dot: mean miss (negative is left). Thin bar: middle 68% of shots; wide bar: middle 95%. Top row is the straightest. Based on the card window.</p>
+      <p class="muted small">Dot: mean miss (negative is left). Thin bar: middle 68% of shots; wide bar: middle 95%. Top row is the straightest. Based on the selected sessions.</p>
     </div>
 
     <div class="card">
@@ -154,7 +188,7 @@
 
     <div class="card">
       <div class="row between">
-        <div><h2>Printed card</h2><p class="muted small">Built from the wedges and intents ticked in the Wedge intents tab.</p></div>
+        <div><h2>Printed card</h2><p class="muted small">Built from all shots of the sessions selected on the Sessions tab, for the wedges and intents ticked in the Wedge intents tab.</p></div>
         <button id="pt-card" type="button" class="primary">Generate wedge card</button>
       </div>
       <div class="muted" id="pt-card-msg"></div>

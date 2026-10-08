@@ -49,6 +49,7 @@ GET: Dict[str, Callable] = {
     "/api/pitching/accuracy": lambda s, q, b: service.accuracy_over_time(s, _first(q, "club"), q.get("measure", "speed_sd")),
     "/api/pitching/straightness": lambda s, q, b: service.straightness(s),
     "/api/pitching/ladder": lambda s, q, b: service.ladder(s, float(q.get("target", 70)), float(q.get("tolerance", 3))),
+    "/api/sessions": lambda s, q, b: service.get_sessions(s, _first(q, "mode")),
     "/api/bag": lambda s, q, b: service.get_bag(s),
     "/api/wedges": lambda s, q, b: service.get_wedges(s),
 }
@@ -56,6 +57,7 @@ GET: Dict[str, Callable] = {
 POST: Dict[str, Callable] = {
     "/api/load": _load,
     "/api/browse": _browse,
+    "/api/sessions": lambda s, q, b: service.set_sessions(s, _first(b, "mode"), b.get("selected", [])),
     "/api/bag": lambda s, q, b: service.set_bag(s, b.get("clubs", [])),
     "/api/wedges": lambda s, q, b: service.set_wedges(s, b.get("pairs", [])),
     "/api/card": lambda s, q, b: service.make_card(s, _first(b, "mode")),

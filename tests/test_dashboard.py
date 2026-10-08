@@ -271,3 +271,85 @@ def test_server_reports_user_errors_as_400_and_hides_other_files(server):
     assert fetch(server, "/files/../golf.toml")[0] == 404
     assert fetch(server, "/files/cards/missing.png")[0] == 404
     assert fetch(server, "/..%2fgolf.toml")[0] == 404
+
+
+# --- sessions ------------------------------------------------------------------------------------
+
+def session_dates(state, mode="swing"):
+    return [s["date"] for s in call(state, "/api/sessions", mode=mode)["sessions"]]
+
+
+def test_sessions_are_listed_newest_first_and_all_take_part(state):
+    listing = call(state, "/api/sessions", mode="swing")
+    assert [s["date"] for s in listing["sessions"]][:2] == ["2026-04-05", "2026-03-29"]
+    assert all(s["selected"] for s in listing["sessions"]) and listing["sessions"][0]["shots"] == 26
+    assert listing["window_weeks"] == 4 and listing["fallback_weeks"] == 12
+
+
+def test_only_the_selected_sessions_are_analysed(state):
+    chosen = session_dates(state)[:3]                       # the three newest
+    listing = call(state, "/api/sessions", method="POST", mode="swing", selected=chosen)
+    assert [s["date"] for s in listing["sessions"] if s["selected"]] == chosen
+
+    assert call(state, "/api/swing/overview")["sessions"] == chosen
+    assert [s["date"] for s in call(state, "/api/swing/progress", label="driver ping")["sessions"]] == chosen[::-1]
+    newest = {r["label"]: r for r in call(state, "/api/swing/review", session=chosen[0], baseline="all")["rows"]}
+    assert newest["driver ping"]["n_before"] == 24           # two earlier sessions of 12 shots, not five
+    card = call(state, "/api/card", method="POST", mode="swing")
+    assert card["sessions"] == 3 and card["from"] == chosen[-1] and card["as_of"] == chosen[0]
+
+
+def test_the_card_uses_every_shot_of_the_selected_sessions(state):
+    from golf.report.build import generate_card
+
+    chosen = session_dates(state)[:2]
+    call(state, "/api/sessions", method="POST", mode="swing", selected=chosen)
+    _, card = generate_card("swing", state.included("swing"), state.config)
+    assert dict(zip(card["label"], card["n"])) == {"driver ping": 24, "7i 245": 20, "gw 50": 8}
+    assert dict(zip(card["label"], card["status"])) == {"driver ping": "ok", "7i 245": "ok", "gw 50": "short"}
+
+
+def test_swing_and_pitching_selections_are_independent(state):
+    call(state, "/api/sessions", method="POST", mode="swing", selected=session_dates(state)[:1])
+    assert len(call(state, "/api/pitching/overview")["sessions"]) == 6
+    assert len(call(state, "/api/pitching/accuracy", club="gw 50", measure="speed_sd")["sessions"]) == 6
+    call(state, "/api/sessions", method="POST", mode="pitching", selected=session_dates(state, "pitching")[:2])
+    assert len(call(state, "/api/pitching/overview")["sessions"]) == 2
+    assert len(call(state, "/api/pitching/accuracy", club="gw 50", measure="speed_sd")["sessions"]) == 2
+    assert len(call(state, "/api/swing/overview")["sessions"]) == 1
+    info = call(state, "/api/state")["datasets"]
+    assert info["swing"]["sessions_selected"] == 1 and info["pitching"]["sessions_selected"] == 2
+
+
+def test_sessions_added_later_take_part_and_other_folders_start_complete(state, tmp_path):
+    call(state, "/api/sessions", method="POST", mode="swing", selected=session_dates(state)[:3])
+    write_session(tmp_path / "swing", date(2026, 5, 1), [("Driver Ping", 210.0 + i, 1.0, 100.0) for i in range(12)])
+    call(state, "/api/load", method="POST", swing_dir=str(tmp_path / "swing"))
+    listing = call(state, "/api/sessions", mode="swing")["sessions"]
+    assert listing[0]["date"] == "2026-05-01" and listing[0]["selected"]
+    assert sum(s["selected"] for s in listing) == 4
+
+    other = tmp_path / "other"
+    other.mkdir()
+    write_session(other, date(2026, 6, 1), [("Driver Ping", 200.0 + i, 1.0, 100.0) for i in range(6)])
+    call(state, "/api/load", method="POST", swing_dir=str(other))
+    assert [s["selected"] for s in call(state, "/api/sessions", mode="swing")["sessions"]] == [True]
+
+
+def test_the_session_selection_is_checked(state):
+    with pytest.raises(api.ApiError, match="at least one"):
+        call(state, "/api/sessions", method="POST", mode="swing", selected=[])
+    with pytest.raises(api.ApiError, match="Not a session"):
+        call(state, "/api/sessions", method="POST", mode="swing", selected=["1999-01-01"])
+    assert call(state, "/api/sessions", mode="swing")["sessions"][0]["selected"]
+
+
+def test_the_command_line_card_uses_the_saved_selection(state, tmp_path):
+    from golf.cli import build_cards
+
+    chosen = session_dates(state)[:2]
+    call(state, "/api/sessions", method="POST", mode="swing", selected=chosen)
+    build_cards(config_path=state.config_path)
+    import matplotlib.image as image
+    assert image.imread(state.config.cards_dir("swing") / "swing_distance_card.png").shape[0] == 4050
+    assert (state.config.cards_dir("swing") / "archive" / f"{chosen[0]}_swing_distance_card.png").exists()

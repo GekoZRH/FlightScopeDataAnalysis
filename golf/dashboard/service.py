@@ -22,9 +22,10 @@ from golf.config import MODES, BagSpec, Config, load_config, update_local_settin
 from golf.data import load_shots, unparsed_labels
 from golf.data.labels import FULL_SWING
 from golf.report.build import generate_card
+from golf.sessions import include_sessions, session_table
 from golf.stats import (
     COVERAGE_1S, COVERAGE_2S, compare_normal, describe, fit_bivariate, fit_univariate,
-    select_window, session_summary,
+    session_summary,
 )
 
 BASELINE_CHOICES = {"last4": 4, "all": None}
@@ -55,9 +56,16 @@ class AppState:
                 self.shots[mode] = None
                 self.errors[mode] = str(error)
 
-    def selected(self, mode: str) -> pd.DataFrame:
-        """Shots of the clubs and intents chosen for `mode`, in card order."""
+    def included(self, mode: str) -> Optional[pd.DataFrame]:
+        """All shots of the sessions chosen on the Sessions tab (None if no data is loaded)."""
         shots = self.shots[mode]
+        if shots is None:
+            return None
+        return include_sessions(shots, self.config.excluded_sessions.get(mode, ()))
+
+    def selected(self, mode: str) -> pd.DataFrame:
+        """Shots of the chosen sessions, limited to the clubs and intents chosen for `mode`, in card order."""
+        shots = self.included(mode)
         if shots is None:
             return pd.DataFrame()
         return select_bag(shots, self.config.bag[mode], full_swing_first=True)
@@ -96,6 +104,7 @@ def dataset_info(state: AppState) -> Dict:
             "folder": str(folder), "loaded": True,
             "files": int(shots["source_file"].nunique()), "shots": int(len(shots)),
             "sessions": int(shots["session_date"].nunique()),
+            "sessions_selected": int(state.included(mode)["session_date"].nunique()),
             "last_session": str(shots["session_date"].max()),
             "unreadable": problems.to_dict("records"),
             "not_in_bag": extra.to_dict("records"),
@@ -277,11 +286,7 @@ def dispersion(state: AppState, mode: str, label: str, session: str, compare: st
     day = _parse_day(session)
     now = group[group["session_date"] == day]
 
-    if compare == "window":
-        earlier = group[group["session_date"] < day]
-        before = select_window(earlier, state.config.stats, as_of=day - pd.Timedelta(days=1)) if not earlier.empty else earlier
-    else:
-        before = _baseline(group, day, compare)
+    before = _baseline(group, day, compare)
 
     def points(frame):
         return {"lateral": frame["lateral_m"].round(2).tolist(), "carry": frame["carry_m"].round(2).tolist()}
@@ -344,7 +349,7 @@ ACCURACY_MEASURES = {
 def accuracy_over_time(state: AppState, club: str, measure: str) -> Dict:
     """For one wedge: the chosen measure per session, one series per intent."""
     column, kind, title = ACCURACY_MEASURES[measure]
-    shots = state.shots["pitching"]
+    shots = state.included("pitching")
     if shots is None:
         return {"title": title, "sessions": [], "series": []}
     base = (shots["club"].fillna("") + " " + shots["variant"].fillna("")).str.strip()
@@ -367,21 +372,23 @@ def accuracy_over_time(state: AppState, club: str, measure: str) -> Dict:
     return clean({"title": title, "sessions": sessions, "series": series})
 
 
-def _card_window_shots(state: AppState, mode: str) -> pd.DataFrame:
-    if state.selected(mode).empty:
-        return pd.DataFrame(columns=["label", "carry_m", "lateral_m", "window"])
-    return select_window(state.selected(mode), state.config.stats, require=("carry_m", "lateral_m"))
+def _selection_shots(state: AppState, mode: str) -> pd.DataFrame:
+    """Shots with a carry and a lateral value from the selected sessions, clubs and intents."""
+    df = state.selected(mode)
+    if df.empty:
+        return pd.DataFrame(columns=["label", "carry_m", "lateral_m"])
+    return df.dropna(subset=["carry_m", "lateral_m"])
 
 
 def straightness(state: AppState) -> Dict:
-    """Lateral miss of each selected wedge and intent over the card window."""
-    window = _card_window_shots(state, "pitching")
+    """Lateral miss of each selected wedge and intent over the selected sessions."""
+    window = _selection_shots(state, "pitching")
     s = state.config.stats
     rows = []
     for label, group in window.groupby("label", sort=False):
         info = describe(group["lateral_m"], s)
         rows.append({
-            "label": label, "n": info["n"], "window": group["window"].iloc[0],
+            "label": label, "n": info["n"], "short": info["n"] < s.min_shots,
             "mean": info["mean"], "sd": info["sd"], "lo68": info["lo68"], "hi68": info["hi68"],
             "lo95": info["lo95"], "hi95": info["hi95"],
             "rms": math.sqrt(info["mean"] ** 2 + info["sd"] ** 2) if info["n"] > 1 else float("nan"),
@@ -391,7 +398,7 @@ def straightness(state: AppState) -> Dict:
 
 def ladder(state: AppState, target: float, tolerance: float) -> Dict:
     """Which wedge and intent is most likely to finish within `tolerance` of `target` (carry)."""
-    window = _card_window_shots(state, "pitching")
+    window = _selection_shots(state, "pitching")
     s = state.config.stats
     rows = []
     for label, group in window.groupby("label", sort=False):
@@ -401,12 +408,47 @@ def ladder(state: AppState, target: float, tolerance: float) -> Dict:
         fit = fit_univariate(carry, min_n_skew=s.min_shots_skew, alpha=s.skew_alpha)
         lateral = describe(group["lateral_m"], s)
         rows.append({
-            "label": label, "n": len(carry), "window": group["window"].iloc[0],
+            "label": label, "n": len(carry), "short": len(carry) < s.min_shots,
             "mean": fit.mean, "sd": fit.sd, "lat_sd": lateral["sd"],
             "chance": fit.prob_between(target - tolerance, target + tolerance),
         })
     rows.sort(key=lambda r: -r["chance"])
     return clean({"target": target, "tolerance": tolerance, "rows": rows[:8]})
+
+
+# --- sessions -------------------------------------------------------------------------------------
+
+def get_sessions(state: AppState, mode: str) -> Dict:
+    """Every session of the loaded data with its shot count and whether it takes part."""
+    shots = state.shots[mode]
+    if shots is None:
+        return {"loaded": False, "sessions": []}
+    excluded = state.config.excluded_sessions.get(mode, frozenset())
+    sessions = [dict(row, selected=row["date"] not in excluded) for row in session_table(shots)]
+    stats = state.config.stats
+    return clean({
+        "loaded": True, "sessions": sessions,
+        "window_weeks": stats.window_weeks, "fallback_weeks": stats.fallback_weeks,
+    })
+
+
+def set_sessions(state: AppState, mode: str, selected: List[str]) -> Dict:
+    """Choose the sessions that take part; sessions added to the folder later take part automatically."""
+    shots = state.shots[mode]
+    if shots is None:
+        raise ValueError(f"No {mode} data is loaded")
+    every = {row["date"] for row in session_table(shots)}
+    unknown = sorted(set(selected) - every)
+    if unknown:
+        raise ValueError(f"Not a session in the data: {', '.join(unknown)}")
+    if not selected:
+        raise ValueError("Select at least one session")
+    excluded = sorted(every - set(selected))
+    folder = str(state.config.data_dir(mode))
+    with state.lock:
+        update_local_settings(state.config, {"sessions": {mode: {folder: {"excluded": excluded}}}})
+        state.reload_config()
+    return get_sessions(state, mode)
 
 
 # --- bag and wedge selection -------------------------------------------------------------------
@@ -471,14 +513,16 @@ def set_wedges(state: AppState, pairs: List[List]) -> Dict:
 # --- cards ------------------------------------------------------------------------------------------
 
 def make_card(state: AppState, mode: str) -> Dict:
-    shots = state.shots.get(mode)
+    shots = state.included(mode)
     if shots is None:
         raise ValueError(f"No {mode} data is loaded")
     with state.lock:
         paths, card = generate_card(mode, shots, state.config)
     relative = paths[0].relative_to(state.config.output_dir).as_posix()
-    flagged = card[card["status"] != "ok"][["label", "status", "n", "window"]].to_dict("records")
+    flagged = card[card["status"] != "ok"][["label", "n"]].to_dict("records")
+    first = card.iloc[0]
     return clean({
         "file": str(paths[0]), "archive": str(paths[1]), "url": f"/files/{relative}",
-        "rows": len(card), "as_of": card["as_of"].iloc[0], "flagged": flagged,
+        "rows": len(card), "sessions": first["sessions"], "from": first["from"], "as_of": first["as_of"],
+        "flagged": flagged,
     })

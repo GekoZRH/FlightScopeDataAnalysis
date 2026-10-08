@@ -3,8 +3,7 @@
 One horizontal bar per club (and swing intent). Dot and bold number: mean carry.
 Thin bar and the numbers above it: central 68% of shots (about 1 sigma). Wide
 bar and the numbers below it: central 95% (about 2 sigma). A '*' after the club
-means its numbers come from older shots because the last few weeks did not
-contain enough of them.
+means the selected sessions contain too few shots of it to rely on the numbers.
 """
 
 from __future__ import annotations
@@ -34,7 +33,7 @@ GRID_WIDTH = 3.0
 NUMBER_OFFSET_M = 0.7          # gap between a bar end and its number, in metres of carry
 ROLL_GAP_M = 4.0
 LIMIT_ROUND = 5               # axis limits are rounded to multiples of this
-MARKERS = {"ok": "", "history": "*", "short": "**"}
+MARKERS = {"ok": "", "short": "*"}
 
 
 def _round_down(value: float, step: int) -> float:
@@ -47,10 +46,8 @@ def _round_up(value: float, step: int) -> float:
 
 def _footnote(card: pd.DataFrame, settings: StatsSettings) -> str:
     parts = ["Dot / bold = mean.  Thin bar = middle 68% of shots, wide bar = middle 95%."]
-    if (card["status"] == "history").any():
-        parts.append(f"* fewer than {settings.min_shots} shots in the last {settings.fallback_weeks} weeks: all shots on record used.")
     if (card["status"] == "short").any():
-        parts.append(f"** fewer than {settings.min_shots} shots on record: unreliable.")
+        parts.append(f"* fewer than {settings.min_shots} shots in the selected sessions: less reliable.")
     return "\n".join(parts)
 
 
@@ -107,8 +104,10 @@ def draw_distance_card(card: pd.DataFrame, spec: CardSpec, settings: StatsSettin
     for note, y in zip(spec.notes, (0.80, 0.58, 0.36)):
         ax.text(0.04, y, note, transform=ax.transAxes, ha="left", va="top", fontsize=NOTE_FONT)
 
-    as_of = card["as_of"].iloc[0]
-    ax.set_title(f"{spec.title}  (to {as_of})", fontsize=TITLE_FONT)
+    first = card.iloc[0]
+    sessions = f"{first['sessions']} session{'s' if first['sessions'] != 1 else ''}"
+    span = str(first["as_of"]) if first["from"] == first["as_of"] else f"{first['from']} to {first['as_of']}"
+    ax.set_title(f"{spec.title}  ({sessions}, {span})", fontsize=TITLE_FONT)
     ax.set_xlabel("Carry Distance (m)", fontsize=LABEL_FONT)
     ax.set_ylabel("Club", fontsize=LABEL_FONT)
 
