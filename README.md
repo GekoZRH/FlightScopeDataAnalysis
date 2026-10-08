@@ -1,34 +1,49 @@
 # Golf practice analysis
 
-Analysis of FlightScope indoor practice sessions: a dashboard to review the latest session and follow progress, and printed carry-distance cards for the course.
+Analysis of FlightScope indoor practice sessions, in two parts:
 
-## Run it
+- **A dashboard** to review the latest session, follow your progress over time, and see how your carry and your misses are distributed, for full swings and for wedge swings with different intents (9, 10, 11 o'clock).
+- **Printed cards** with the carry distance of each club and its distribution, to take to the course.
 
-Use the `golf` conda environment (Python 3.13, numpy, pandas, scipy, matplotlib, plotly).
+Everything runs on your own computer. The data never leaves it.
+
+## Quick start
+
+Use the `golf` conda environment (Python 3.13 with numpy, pandas, scipy, matplotlib and plotly; Python 3.11 or newer is required).
 
 ```
-python -m golf dashboard     # opens the dashboard in your browser (Ctrl+C to stop)
-python -m golf cards         # writes both printed cards without opening the dashboard
-python -m pytest             # tests
+conda activate golf
+python -m golf dashboard      # opens the dashboard in your browser; Ctrl+C stops it
+python -m golf cards          # writes both printed cards without opening the dashboard
+python -m pytest              # runs the tests
 ```
 
-## The dashboard
+After a practice session:
 
-- **Data folders:** type or browse to the folder with the full swing CSV exports and the folder with the pitching CSV exports, then press Load data. Only the CSV files directly in a folder are read, so older exports can be kept in a subfolder.
-- **Sessions:** tick the sessions that take part. Everything else (reviews, the earlier sessions they are compared with, progress, cards) uses only those. The quick buttons select the last 4 or 12 weeks or the last N sessions. Sessions added to the folder later are ticked automatically.
-- **Full swing / Pitching:** session review against the sessions before, progress per session, dispersion, and (pitching) accuracy by intent, straightness and which club for a distance.
-- **Bag / Wedge intents:** choose which clubs and which wedge intents go on the cards.
-- **Generate card:** each tab has a button that writes its printed card.
+1. Export the session from FlightScope as CSV and save it in your data folder (for example `SwingData/Indoor` or `PitchingData/Indoor`).
+2. Start the dashboard and press **Load data**. The new session is selected automatically.
+3. Review the session, then press **Generate card** on the Full swing or Pitching tab if you want a new printed card.
 
-Cards are written to `Output/cards/<data folder>/` (for example `SwingData_Indoor`), once under a fixed name to print and once with the date of the last session in `archive/`. A different data folder gets its own card folder.
+## Documentation
 
-## Settings
+| Document | What it covers |
+|---|---|
+| [User guide](docs/user-guide.md) | Every tab and button, the printed cards, adding new clubs, troubleshooting |
+| [Data and settings](docs/data-and-settings.md) | The CSV format, how club names are read, `golf.toml` and `golf.local.json` |
+| [Statistics](docs/statistics.md) | How every number and range is calculated, and what it can and cannot tell you |
+| [Development](docs/development.md) | Code layout, the dashboard's interface, tests, known leftovers |
 
-- `golf.toml`: defaults for the bag, aliases for club names that were typed differently, the statistics thresholds (minimum number of shots, the 4 and 12 week quick buttons) and the look of the cards.
-- `golf.local.json`: what you choose in the dashboard (data folders, sessions left out, bag, wedge intents). It overrides `golf.toml`, is not committed, and can be deleted to return to the defaults.
+## What is in this folder
 
-## Notes
+| Path | Contents |
+|---|---|
+| `golf/` | The program |
+| `tests/` | Automated tests (they use made-up data, so they run without your CSV files) |
+| `docs/` | The documentation above |
+| `golf.toml` | Default settings, committed |
+| `golf.local.json` | Your own choices from the dashboard (folders, sessions, bag). Created automatically, not committed |
+| `SwingData/`, `PitchingData/` | Your exported sessions. Not committed |
+| `Output/` | Generated cards. Not committed |
+| `Analysis_legacy/` | The original scripts, kept for comparison until the new code is trusted |
 
-- A card uses all shots of the selected sessions. A `*` after a club means there are fewer than 12 shots of it in that selection, so its numbers are less reliable.
-- Ranges on the cards are the middle 68% and 95% of shots (the same shots as ±1 and ±2 standard deviations for a normal distribution). A skewed distribution is only used when there are at least 25 shots and it fits significantly better than a normal one.
-- `Analysis_legacy/` is the original set of scripts, kept for comparison until the new code is trusted.
+Personal data stays out of git: CSV files, the data folders, `Output/`, `Plot/` and `golf.local.json` are ignored (see `.gitignore`).
