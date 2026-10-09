@@ -19,7 +19,8 @@ import pandas as pd
 
 from golf.bag import available_clubs, club_variant, intent_grid, select_bag, unlisted_clubs
 from golf.config import MODES, BagSpec, Config, load_config, update_local_settings
-from golf.data import load_shots, unparsed_labels
+from golf.data import load_shots, unparsed_labels, unreadable_weights
+from golf.data.stack import stack_files
 from golf.data.labels import FULL_SWING
 from golf.report.build import generate_card
 from golf.sessions import include_sessions, session_table
@@ -53,6 +54,10 @@ class AppState:
 
     def reload_data(self, modes=MODES) -> None:
         for mode in modes:
+            if self.config.data_dir(mode) is None:        # no folder chosen: this kind of data is not used
+                self.shots[mode] = None
+                self.errors.pop(mode, None)
+                continue
             try:
                 self.shots[mode] = load_shots(mode, self.config)
                 self.errors.pop(mode, None)
@@ -106,13 +111,18 @@ def dataset_info(state: AppState) -> Dict:
     for mode in MODES:
         shots = state.shots[mode]
         folder = state.config.data_dir(mode)
-        if shots is None:
-            info[mode] = {"folder": str(folder), "loaded": False, "error": state.errors.get(mode, "")}
+        if folder is None:
+            info[mode] = {"folder": "", "enabled": False, "loaded": False, "error": ""}
             continue
-        problems = unparsed_labels(shots)
-        extra = unlisted_clubs(shots, state.config.bag[mode])
+        if shots is None:
+            info[mode] = {"folder": str(folder), "enabled": True, "loaded": False, "error": state.errors.get(mode, "")}
+            continue
+        if mode == "stack":
+            problems, extra = unreadable_weights(shots), pd.DataFrame()
+        else:
+            problems, extra = unparsed_labels(shots), unlisted_clubs(shots, state.config.bag[mode])
         info[mode] = {
-            "folder": str(folder), "loaded": True,
+            "folder": str(folder), "enabled": True, "loaded": True,
             "files": int(shots["source_file"].nunique()), "shots": int(len(shots)),
             "sessions": int(shots["session_date"].nunique()),
             "sessions_selected": int(state.included(mode)["session_date"].nunique()),
@@ -123,15 +133,25 @@ def dataset_info(state: AppState) -> Dict:
     return clean(info)
 
 
-def set_folders(state: AppState, swing_dir: Optional[str], pitching_dir: Optional[str]) -> Dict:
+def set_folders(state: AppState, folders: Dict[str, Optional[str]]) -> Dict:
+    """Choose the data folders. `folders` maps a kind of data to its folder.
+
+    An empty value means: no data of this kind (the folder is left empty on purpose).
+    A kind that is not in `folders` keeps its folder.
+    """
     patch = {}
-    for mode, value in (("swing", swing_dir), ("pitching", pitching_dir)):
-        if not value:
+    for mode in MODES:
+        if mode not in folders or folders[mode] is None:
+            continue
+        value = str(folders[mode]).strip()
+        if value == "":
+            patch[f"{mode}_dir"] = ""
             continue
         folder = Path(value).expanduser()
         if not folder.is_dir():
             raise ValueError(f"{value} is not a folder")
-        if not any(folder.glob("*.csv")):
+        has_files = bool(stack_files(folder)) if mode == "stack" else any(folder.glob("*.csv"))
+        if not has_files:
             raise ValueError(f"No CSV files found in {value}")
         patch[f"{mode}_dir"] = str(folder)
     with state.lock:
@@ -512,6 +532,46 @@ def _line_fit(x: np.ndarray, y: np.ndarray) -> Optional[Dict]:
         return None
     slope, intercept = np.polyfit(x, y, 1)
     return {"slope": float(slope), "intercept": float(intercept), "r": float(np.corrcoef(x, y)[0, 1]), "n": int(len(x))}
+
+
+# --- stack training -------------------------------------------------------------------------
+
+def stack_overview(state: AppState) -> Dict:
+    """The selected stack sessions and the weights used in them (heaviest first)."""
+    shots = state.included("stack")
+    if shots is None:
+        return {"loaded": False, "sessions": [], "weights": []}
+    usable = shots.dropna(subset=["weight_g", "club_speed_mph"])
+    return clean({
+        "loaded": True, "sessions": sessions_of(usable),
+        "weights": sorted(usable["weight_g"].unique(), reverse=True),
+    })
+
+
+def stack_progress(state: AppState) -> Dict:
+    """Club head speed per session, one series per weight.
+
+    `dates` lists every selected session; a weight has a point only in the sessions in which it was used.
+    Each point is the average speed of all swings with that weight in the session, with its 95% interval.
+    """
+    shots = state.included("stack")
+    if shots is None:
+        return {"dates": [], "series": []}
+    usable = shots.dropna(subset=["weight_g", "club_speed_mph"])
+    dates = sorted({str(d) for d in usable["session_date"]})
+    summary = session_summary(usable, "club_speed_mph", by=["weight_g"], level=state.config.stats.ci_level)
+    series = []
+    for weight, group in summary.groupby("weight_g"):
+        points = {str(row["session_date"]): row for _, row in group.iterrows()}
+        series.append({
+            "weight": float(weight), "name": f"{weight:g} g",
+            "y": [points[d]["mean"] if d in points else None for d in dates],
+            "lo": [points[d]["mean_lo"] if d in points else None for d in dates],
+            "hi": [points[d]["mean_hi"] if d in points else None for d in dates],
+            "n": [int(points[d]["n"]) if d in points else None for d in dates],
+        })
+    series.sort(key=lambda item: -item["weight"])
+    return clean({"dates": dates, "series": series})
 
 
 # --- sessions -------------------------------------------------------------------------------------

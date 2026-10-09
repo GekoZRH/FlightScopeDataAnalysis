@@ -10,15 +10,21 @@
 <main>
   <header class="card" id="data-panel">
     <h1>Golf practice dashboard</h1>
+    <p class="muted small" style="margin:0 0 8px">Leave a folder empty if you have no data of that kind; it is then not used.</p>
     <div class="folder-row">
       <label for="swing-dir">Full swing data</label>
-      <input type="text" id="swing-dir" spellcheck="false">
+      <input type="text" id="swing-dir" spellcheck="false" placeholder="no full swing data">
       <button id="browse-swing" type="button">Browse</button>
     </div>
     <div class="folder-row">
       <label for="pitching-dir">Pitching data</label>
-      <input type="text" id="pitching-dir" spellcheck="false">
+      <input type="text" id="pitching-dir" spellcheck="false" placeholder="no pitching data">
       <button id="browse-pitching" type="button">Browse</button>
+    </div>
+    <div class="folder-row">
+      <label for="stack-dir">Stack data</label>
+      <input type="text" id="stack-dir" spellcheck="false" placeholder="no stack data">
+      <button id="browse-stack" type="button">Browse</button>
     </div>
     <div class="row between">
       <div class="muted" id="data-status">Loading…</div>
@@ -28,17 +34,23 @@
     <div id="error" class="error" hidden></div>
   </header>
 
-  <nav class="tabs" role="tablist">
+  <div class="card" id="no-data" hidden>
+    <h2>No data yet</h2>
+    <p class="muted">Enter the folder with your exported sessions above (full swing, pitching and stack data) and press Load data. You only need the kinds of data you have; leave the other folders empty.</p>
+  </div>
+
+  <nav class="tabs" role="tablist" id="tabs">
     <button class="tab" data-tab="sessions" role="tab">Sessions</button>
     <button class="tab on" data-tab="swing" role="tab">Full swing</button>
     <button class="tab" data-tab="pitching" role="tab">Pitching</button>
+    <button class="tab" data-tab="stack" role="tab">Stack</button>
     <span class="grow"></span>
     <button class="tab" data-tab="bag" role="tab">Bag</button>
     <button class="tab" data-tab="wedges" role="tab">Wedge intents</button>
   </nav>
 
   <section id="tab-sessions" hidden>
-    <div class="card">
+    <div class="card" id="ss-card-swing">
       <div class="row between">
         <div>
           <h2>Full swing sessions</h2>
@@ -53,7 +65,7 @@
       </div>
       <div class="table-wrap"><table id="ss-swing-table"></table></div>
     </div>
-    <div class="card">
+    <div class="card" id="ss-card-pitching">
       <div class="row between">
         <div>
           <h2>Pitching sessions</h2>
@@ -67,6 +79,21 @@
         </div>
       </div>
       <div class="table-wrap"><table id="ss-pitching-table"></table></div>
+    </div>
+    <div class="card" id="ss-card-stack">
+      <div class="row between">
+        <div>
+          <h2>Stack sessions</h2>
+          <p class="muted small" id="ss-stack-summary"></p>
+        </div>
+        <div class="controls" data-mode="stack">
+          <button type="button" data-preset="all">All</button>
+          <button type="button" data-preset="weeks1" id="ss-stack-w1">Last 4 weeks</button>
+          <button type="button" data-preset="weeks2" id="ss-stack-w2">Last 12 weeks</button>
+          <label>Last <input type="number" min="1" value="4" id="ss-stack-n"> sessions <button type="button" data-preset="lastn">Select</button></label>
+        </div>
+      </div>
+      <div class="table-wrap"><table id="ss-stack-table"></table></div>
     </div>
     <p class="muted small">Only the ticked sessions are used everywhere: the reviews, the earlier sessions they are compared with, the progress charts, and the printed cards. Changes apply at once and are remembered for this data folder. Sessions you add to the folder later are ticked automatically. The "last weeks" buttons count back from the newest session.</p>
   </section>
@@ -213,6 +240,17 @@
       </div>
       <div class="muted" id="pt-card-msg"></div>
       <img id="pt-card-img" class="card-preview" alt="" hidden>
+    </div>
+  </section>
+
+  <section id="tab-stack" hidden>
+    <div class="card">
+      <div class="row between">
+        <h2>Progress</h2>
+        <span class="muted small">Click a weight in the legend to hide or show its line</span>
+      </div>
+      <div id="stack-progress" class="plot tall"></div>
+      <p class="muted small">Average club head speed of all swings with that weight in each selected session. A weight has a point only in the sessions in which it was used, and its line continues across the others. Heavy weights are red, light weights blue, and every weight has its own marker shape. Hover a point for the number of swings and the 95% interval.</p>
     </div>
   </section>
 

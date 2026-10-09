@@ -4,7 +4,7 @@
 
 ```
 conda activate golf            # Python 3.13; Python >= 3.11 is needed (tomllib)
-python -m pytest               # about 140 tests, roughly 35 seconds
+python -m pytest               # about 170 tests, roughly 45 seconds
 ```
 
 `requirements.txt` lists the packages. The tests use made-up data in temporary folders and their own copy of the configuration, so they neither need your CSV files nor change your settings. A few extra checks run against your real data and are skipped when it is absent. The web server tests start a server on a free port.
@@ -22,6 +22,7 @@ golf/
     labels.py             "GW 50_9" -> club, variant, intent
     columns.py            raw CSV columns -> fixed names and units
     load.py               read the files into one table, one row per shot
+    stack.py              stack sessions: the weight is read from the Club column
   stats/
     univariate.py         normal / skew-normal fit and ranges
     bivariate.py          joint lateral-carry model (Gaussian copula)
@@ -62,8 +63,9 @@ The page talks to the server with JSON. Requests carry the current choices; noth
 
 | URL | Method | Purpose |
 |---|---|---|
-| `/api/state` | GET | Folders, file and shot counts, notes about unselected clubs |
-| `/api/load` | POST | Set the data folders and reload |
+| `/api/state` | GET | Folders, file and shot counts, notes about unselected clubs; `enabled` is false for a kind without a folder |
+| `/api/load` | POST | Set the data folders (`swing_dir`, `pitching_dir`, `stack_dir`) and reload. An empty value turns that kind off; a key that is left out keeps its folder |
+| `/api/stack/overview`, `/api/stack/progress` | GET | The selected stack sessions and weights; club head speed per session, one series per weight |
 | `/api/browse` | POST | Show the folder dialog and return the folder |
 | `/api/sessions` | GET, POST | List sessions with their selection; save the selection |
 | `/api/bag` | GET, POST | Clubs found in the swing data; save the bag |

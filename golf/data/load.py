@@ -57,15 +57,22 @@ def read_shot_file(path, mode: str, parser: Optional[LabelParser] = None) -> pd.
 
 
 def load_shots(mode: str, config: "Config | None" = None, directory=None) -> pd.DataFrame:
-    """Load every CSV of one mode ('swing' or 'pitching') into a single table.
+    """Load every CSV of one mode ('swing', 'pitching' or 'stack') into a single table.
 
-    Only the top level of the data folder is read, so older exports can be kept
-    out of the analysis by moving them into a subfolder (e.g. 'legacy data').
+    For swing and pitching only the top level of the data folder is read, so older
+    exports can be kept out of the analysis by moving them into a subfolder (e.g.
+    'legacy data'). Stack data is read from the folder and from one level below it.
     """
     from golf.config import load_config
 
     config = config or load_config()
     folder = Path(directory) if directory else config.data_dir(mode)
+    if folder is None:
+        raise FileNotFoundError(f"No folder is chosen for {mode} data")
+    if mode == "stack":
+        from golf.data.stack import load_stack
+
+        return load_stack(folder)
     files = sorted(folder.glob("*.csv"))
     if not files:
         raise FileNotFoundError(f"No CSV files found in {folder}")

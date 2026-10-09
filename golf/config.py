@@ -20,7 +20,9 @@ from golf.ordering import sort_entries
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "golf.toml"
 LOCAL_SETTINGS_NAME = "golf.local.json"
 
-MODES = ("swing", "pitching")
+# The kinds of data. A data folder can be left empty for any of them; that kind is then not used.
+MODES = ("swing", "pitching", "stack")
+BAG_MODES = ("swing", "pitching")      # the kinds that have a bag and a printed card
 
 
 @dataclass(frozen=True)
@@ -74,23 +76,27 @@ class StatsSettings:
 @dataclass(frozen=True)
 class Config:
     root: Path
-    swing_dir: Path
-    pitching_dir: Path
+    swing_dir: Optional[Path]          # None = no folder chosen: this kind of data is not used
+    pitching_dir: Optional[Path]
     output_dir: Path
     label_aliases: Dict[str, str] = field(default_factory=dict)
     variant_aliases: Dict[str, str] = field(default_factory=dict)
     bag: Dict[str, BagSpec] = field(default_factory=dict)
     stats: StatsSettings = field(default_factory=StatsSettings)
     cards: Dict[str, CardSpec] = field(default_factory=dict)
+    stack_dir: Optional[Path] = None
     default_bag: Dict[str, BagSpec] = field(default_factory=dict)   # golf.toml, before local choices
     excluded_sessions: Dict[str, frozenset] = field(default_factory=dict)   # mode -> session dates left out
     local_path: Optional[Path] = None
 
-    def data_dir(self, mode: str) -> Path:
+    def data_dir(self, mode: str) -> Optional[Path]:
+        """The data folder of one kind of data, or None if none is chosen."""
         if mode == "swing":
             return self.swing_dir
         if mode == "pitching":
             return self.pitching_dir
+        if mode == "stack":
+            return self.stack_dir
         raise ValueError(f"Unknown mode {mode!r}, expected one of {MODES}")
 
     def cards_dir(self, mode: str) -> Path:
@@ -99,7 +105,10 @@ class Config:
         One folder per data folder, so switching data sets does not overwrite
         the cards of another one.
         """
-        return self.output_dir / "cards" / dataset_slug(self.data_dir(mode))
+        folder = self.data_dir(mode)
+        if folder is None:
+            raise ValueError(f"No {mode} data folder is chosen")
+        return self.output_dir / "cards" / dataset_slug(folder)
 
     def label_parser(self) -> LabelParser:
         return LabelParser(self.label_aliases, self.variant_aliases)
@@ -110,6 +119,13 @@ def dataset_slug(folder: Path) -> str:
     folder = Path(folder)
     parts = [folder.parent.name, folder.name]
     return re.sub(r"[^A-Za-z0-9._-]+", "_", "_".join(p for p in parts if p)).strip("_") or "data"
+
+
+def _folder(root: Path, value) -> Optional[Path]:
+    """A folder from the settings, relative to `root`; None for an empty value (no data of this kind)."""
+    if value is None or str(value).strip() == "":
+        return None
+    return root / str(value).strip()
 
 
 def _read_local(path: Path) -> dict:
@@ -133,8 +149,8 @@ def load_config(path: Optional[Path] = None, local_path: Optional[Path] = None) 
 
     default_bag: Dict[str, BagSpec] = {}
     for mode, spec in raw.get("bag", {}).items():
-        if mode not in MODES:
-            raise ValueError(f"[bag.{mode}] is not a known mode, expected one of {MODES}")
+        if mode not in BAG_MODES:
+            raise ValueError(f"[bag.{mode}] is not a known mode, expected one of {BAG_MODES}")
         default_bag[mode] = BagSpec(
             clubs=tuple(c.strip().lower() for c in spec["clubs"]),
             intents=tuple(int(i) for i in spec.get("intents", [FULL_SWING])),
@@ -142,8 +158,8 @@ def load_config(path: Optional[Path] = None, local_path: Optional[Path] = None) 
 
     cards: Dict[str, CardSpec] = {}
     for mode, spec in raw.get("cards", {}).items():
-        if mode not in MODES:
-            raise ValueError(f"[cards.{mode}] is not a known mode, expected one of {MODES}")
+        if mode not in BAG_MODES:
+            raise ValueError(f"[cards.{mode}] is not a known mode, expected one of {BAG_MODES}")
         values = dict(spec)
         values["notes"] = tuple(values.get("notes", ()))
         cards[mode] = CardSpec(**values)
@@ -162,18 +178,22 @@ def load_config(path: Optional[Path] = None, local_path: Optional[Path] = None) 
         preferred = default_bag.get("pitching", BagSpec(clubs=())).clubs
         bag["pitching"] = BagSpec.from_pairs(pairs, preferred)
 
-    swing_dir = root / local.get("swing_dir", paths["swing_dir"])
-    pitching_dir = root / local.get("pitching_dir", paths["pitching_dir"])
+    # A folder that is empty ("") means: no data of this kind. A missing entry means: use the default.
+    swing_dir = _folder(root, local.get("swing_dir", paths.get("swing_dir")))
+    pitching_dir = _folder(root, local.get("pitching_dir", paths.get("pitching_dir")))
+    stack_dir = _folder(root, local.get("stack_dir", paths.get("stack_dir")))
     # Sessions left out are remembered per data folder, so another folder starts with all sessions.
     excluded = {
         mode: frozenset(local.get("sessions", {}).get(mode, {}).get(str(folder), {}).get("excluded", []))
-        for mode, folder in (("swing", swing_dir), ("pitching", pitching_dir))
+        if folder is not None else frozenset()
+        for mode, folder in (("swing", swing_dir), ("pitching", pitching_dir), ("stack", stack_dir))
     }
 
     return Config(
         root=root,
         swing_dir=swing_dir,
         pitching_dir=pitching_dir,
+        stack_dir=stack_dir,
         output_dir=root / paths["output_dir"],
         label_aliases=dict(aliases.get("label", {})),
         variant_aliases=dict(aliases.get("variant", {})),

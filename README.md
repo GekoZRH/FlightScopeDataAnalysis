@@ -1,8 +1,8 @@
 # Golf practice analysis
 
-Analysis of FlightScope indoor practice sessions, in two parts:
+Analysis of FlightScope indoor practice sessions and of stack (overspeed) training, in two parts:
 
-- **A dashboard** to review the latest session, follow your progress over time, and see how your carry and your misses are distributed, for full swings and for wedge swings with different intents (9, 10, 11 o'clock).
+- **A dashboard** to review the latest session, follow your progress over time, and see how your carry and your misses are distributed, for full swings and for wedge swings with different intents (9, 10, 11 o'clock), and the progress of your stack training per weight.
 - **Printed cards** with the carry distance of each club and its distribution, to take to the course.
 
 Everything runs on your own computer. The data never leaves it.
@@ -20,7 +20,7 @@ python -m pytest              # runs the tests
 
 After a practice session:
 
-1. Export the session from FlightScope as CSV and save it in your data folder (for example `SwingData/Indoor` or `PitchingData/Indoor`).
+1. Export the session from the simulator as CSV and save it in your data folder (for example `SwingData/Indoor`, `PitchingData/Indoor` or `stackdata`). You do not need all three kinds of data; a kind you do not have is simply left empty in the dashboard.
 2. Start the dashboard and press **Load data**. The new session is selected automatically.
 3. Review the session, then press **Generate card** on the Full swing or Pitching tab if you want a new printed card.
 
@@ -42,7 +42,7 @@ After a practice session:
 | `docs/` | The documentation above |
 | `golf.toml` | Default settings, committed |
 | `golf.local.json` | Your own choices from the dashboard (folders, sessions, bag). Created automatically, not committed |
-| `SwingData/`, `PitchingData/` | Your exported sessions. Not committed |
+| `SwingData/`, `PitchingData/`, `stackdata/` | Your exported sessions (the folders can be anywhere; these are the defaults). Not committed |
 | `Output/` | Generated cards. Not committed |
 | `Analysis_legacy/` | The original scripts, kept for comparison until the new code is trusted |
 

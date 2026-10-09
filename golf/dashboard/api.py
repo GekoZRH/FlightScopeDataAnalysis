@@ -24,12 +24,13 @@ def _state(state: AppState, query, body):
 
 
 def _load(state: AppState, query, body):
-    return {"datasets": service.set_folders(state, body.get("swing_dir"), body.get("pitching_dir"))}
+    folders = {mode: body[f"{mode}_dir"] for mode in service.MODES if f"{mode}_dir" in body}
+    return {"datasets": service.set_folders(state, folders)}
 
 
 def _browse(state: AppState, query, body):
     mode = _first(body, "mode")
-    current = str(state.config.data_dir(mode))
+    current = str(state.config.data_dir(mode) or "")
     return {"folder": service.browse_folder(current)}
 
 
@@ -50,6 +51,8 @@ GET: Dict[str, Callable] = {
     "/api/pitching/series": lambda s, q, b: service.series(s, "pitching", _first(q, "label"), _first(q, "measure")),
     "/api/pitching/straightness": lambda s, q, b: service.straightness(s),
     "/api/pitching/ladder": lambda s, q, b: service.ladder(s, float(q.get("target", 70)), float(q.get("tolerance", 3))),
+    "/api/stack/overview": lambda s, q, b: service.stack_overview(s),
+    "/api/stack/progress": lambda s, q, b: service.stack_progress(s),
     "/api/sessions": lambda s, q, b: service.get_sessions(s, _first(q, "mode")),
     "/api/bag": lambda s, q, b: service.get_bag(s),
     "/api/wedges": lambda s, q, b: service.get_wedges(s),

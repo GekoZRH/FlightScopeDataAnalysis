@@ -20,6 +20,17 @@ How the files are read:
 - **Missing values.** A shot without a carry or lateral value is kept, but is left out of every calculation that needs it.
 - **One file with shots from all clubs.** Clubs are told apart by the `Club` column, see below.
 
+## Stack files
+
+Stack (overspeed) training is exported by the simulator as a CSV file with fewer columns:
+
+`Index, Player, Time, V-Plane [deg], H-Plane [deg], Club Speed [mph], Club`
+
+- **Club** holds the weight of the club, for example `235g`. Every swing of a set carries the weight of that set, so a change of weight starts a new set.
+- Only swings of the sets are expected in the file. Warm-up swings should be removed before exporting.
+- The training app saves one folder per session (with the CSV and a screenshot). Both layouts are read: CSV files directly in the stack folder, or one folder level below it.
+- Time, left and right (`2.5 R`, `1.0 L`) and the repeated header rules are the same as for the other files. A swing without plane values is kept (its club speed is valid).
+
 ## How club names are read
 
 The `Club` text is split into **club**, **variant** and **intent**.
@@ -61,7 +72,7 @@ The file is in the project folder and is committed to git. Relative paths are re
 
 | Section | Setting | Meaning |
 |---|---|---|
-| `[paths]` | `swing_dir`, `pitching_dir` | Data folders used until you choose others in the dashboard |
+| `[paths]` | `swing_dir`, `pitching_dir`, `stack_dir` | Data folders used until you choose others in the dashboard. An empty value (`""`) means: no data of that kind |
 | | `output_dir` | Where cards are written (default `Output`) |
 | `[stats]` | `window_weeks`, `fallback_weeks` | The two "Last N weeks" quick buttons on the Sessions tab (4 and 12) |
 | | `min_shots` | Fewer shots than this for a club on a card get a `*` (12) |
@@ -84,6 +95,7 @@ The dashboard writes everything you choose to `golf.local.json`, next to `golf.t
 {
   "swing_dir": "C:\\data\\SwingData\\Indoor",
   "pitching_dir": "C:\\data\\PitchingData\\Indoor",
+  "stack_dir": "",
   "sessions": {
     "swing": {
       "C:\\data\\SwingData\\Indoor": { "excluded": ["2026-03-14", "2026-03-15"] }
@@ -96,7 +108,8 @@ The dashboard writes everything you choose to `golf.local.json`, next to `golf.t
 }
 ```
 
-- `sessions` stores the sessions you left out, per data folder. Sessions you add later are not in the list, so they take part automatically.
+- A folder set to `""` (as `stack_dir` above) means you chose to have no data of that kind; the dashboard then does not use it. A kind that is not listed uses the default from `golf.toml`.
+- `sessions` stores the sessions you left out, per data folder (for full swing, pitching and stack). Sessions you add later are not in the list, so they take part automatically.
 - `bag.swing.clubs` is always put in the standard order (driver, woods, hybrids, irons, wedges).
 - `bag.pitching.pairs` are (wedge, intent) combinations, with 12 meaning a full swing.
 - You may edit the file by hand while the dashboard is closed. Deleting it brings back the defaults.

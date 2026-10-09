@@ -3,6 +3,7 @@
 [paths]
 swing_dir = "SwingData/Indoor"
 pitching_dir = "PitchingData/Indoor"
+stack_dir = "stackdata"        # one folder per session below it, or the CSV files directly in it
 output_dir = "Output"
 
 [stats]

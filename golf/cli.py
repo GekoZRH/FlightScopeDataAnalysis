@@ -24,7 +24,11 @@ def build_cards(as_of: Optional[date] = None, config_path: Optional[Path] = None
     config = load_config(config_path)
     written: List[Path] = []
     for mode in CARDS:
-        shots = load_shots(mode, config)
+        try:
+            shots = load_shots(mode, config)
+        except FileNotFoundError as error:      # no data folder chosen, or nothing in it
+            print(f"[{mode}] skipped: {error}")
+            continue
         report_problems(mode, shots, config)
         shots = include_sessions(shots, config.excluded_sessions.get(mode, ()))
         try:

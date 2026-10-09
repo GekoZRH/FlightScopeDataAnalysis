@@ -15,19 +15,22 @@ The dashboard opens in your browser at `http://127.0.0.1:8765/`. It only listens
 
 ## The page
 
-At the top are the two data folders, then the tabs: **Sessions**, **Full swing**, **Pitching** on the left and **Bag** and **Wedge intents** on the right. The page opens on Full swing.
+At the top are the three data folders (full swing, pitching and stack), then the tabs: **Sessions**, **Full swing**, **Pitching** and **Stack** on the left and **Bag** and **Wedge intents** on the right. The page opens on the first tab that has data, normally Full swing.
 
 ### Data folders
 
-Type the folder with your full swing CSV exports and the folder with your pitching CSV exports, or press **Browse** to pick them in the Windows folder dialog (it can open behind the browser window). Press **Load data** to read them. Below the buttons you see how many files, shots and sessions were found, and the last session.
+Type the folder with your full swing CSV exports, the folder with your pitching CSV exports and the folder with your stack CSV exports, or press **Browse** to pick them in the Windows folder dialog (it can open behind the browser window). Press **Load data** to read them. Below the buttons you see how many files, shots and sessions were found, and the last session.
 
-- Only the CSV files directly in a folder are read. To keep old exports out of the analysis, move them into a subfolder (for example `legacy data`).
+**You do not need all three.** Leave a folder empty if you have no data of that kind: that kind is then not used, its tabs are not shown, and nothing else is affected. If all three are empty the page says so. Fill a folder in again and press Load data to bring the kind back.
+
+- For full swing and pitching only the CSV files directly in the folder are read. To keep old exports out of the analysis, move them into a subfolder (for example `legacy data`).
+- For stack data, the CSV files directly in the folder and in the folders one level below it are read, because the training app saves one folder per session. To keep a stack session out, untick it on the Sessions tab.
 - Using a different folder is the way to keep data sets apart (for example indoor and outdoor). Each folder remembers its own session selection, and its cards are saved separately.
 - An orange note appears when clubs were found in your data that are not selected yet, or when a club name could not be read. See "Adding a new club" below.
 
 ### Sessions tab
 
-A session is one practice day. This tab lists every session of the loaded folders with its shot count, number of clubs and the file it came from. **Tick the sessions that should take part.** Everything else in the dashboard uses only the ticked sessions: the reviews, the progress charts, the dispersion plot, the pitching plots and both printed cards.
+A session is one practice day. This tab lists every session of the loaded folders (full swing, pitching and stack, each in its own list) with its shot count, number of clubs (or weights) and the file it came from. **Tick the sessions that should take part.** Everything else in the dashboard uses only the ticked sessions: the reviews, the progress charts, the dispersion plot, the pitching plots and both printed cards.
 
 - Quick buttons: **All**, **Last 4 weeks**, **Last 12 weeks** (counted back from the newest session in the folder), and **Last N sessions**.
 - Changes apply at once and are remembered for that folder. Sessions you add to the folder later are ticked automatically.
@@ -72,6 +75,12 @@ For wedge swings with intents (full, 11, 10, 9 o'clock).
 
 A `*` after a name in the straightness plot and the distance table means there are fewer than 12 shots, so the numbers are less reliable.
 
+### Stack tab
+
+Progress of your stack training: club head speed per session, **one line per weight**. Each point is the average speed of all swings with that weight in that session. Heavy weights are red and light weights blue. The x-axis shows every ticked stack session; a weight that was not used in a session has no point there and its line continues across. Click a weight in the legend to hide or show its line, and hover a point for the number of swings and the 95% interval.
+
+The weight is read from the `Club` column of the file (`235g` is 235 grams). Swings with a `Club` value that is not a weight are listed in an orange note and left out of the lines.
+
 ### Bag tab
 
 Shows every club found in the swing data with its number of shots and last session. Click a club to put it on the full swing card (and in the Full swing tab) or take it off. The card order is fixed: driver, woods, hybrids, irons from low to high, then wedges. Press **Save bag**.
@@ -112,7 +121,8 @@ If the name could not be read, the note says so. Fix the name in the simulator f
 
 | Problem | What to do |
 |---|---|
-| The page says a folder is not loaded | Check the path, and that the folder contains `.csv` files directly (not only in subfolders). |
+| The page says a folder is not loaded | Check the path, and that the folder contains `.csv` files directly (not only in subfolders; stack data may be one level down). |
+| A tab is missing | Its folder is empty or could not be loaded: Full swing and Bag need the swing folder, Pitching and Wedge intents the pitching folder, Stack the stack folder. |
 | "Port already in use" or an old page appears | Another dashboard is running. Close it, or start with `--port 8766`. |
 | Browse seems to do nothing | The folder dialog may be behind the browser. You can also type the path and press Load data. |
 | Many `*` on the card | Too few shots in the selected sessions. Tick more sessions on the Sessions tab. |

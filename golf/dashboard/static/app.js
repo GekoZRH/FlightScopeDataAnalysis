@@ -99,7 +99,7 @@ function sessionChart(id, dates, series, { title, band = false, height }) {
     }
     traces.push({
       x: dates, y: s.y, name: s.name, mode: "lines+markers", connectgaps: true,
-      line: { color: s.color, width: 2 }, marker: { size: 7, color: s.color },
+      line: { color: s.color, width: 2 }, marker: { size: s.size || 7, color: s.color, symbol: s.symbol || "circle" },
       customdata: dates.map((_, i) => [s.n ? s.n[i] : null, s.lo ? s.lo[i] : null, s.hi ? s.hi[i] : null]),
       hovertemplate: "%{y:.1f}   n=%{customdata[0]}   95%: %{customdata[1]:.1f} to %{customdata[2]:.1f}<extra>" + s.name + "</extra>",
     });
@@ -115,12 +115,15 @@ function sessionChart(id, dates, series, { title, band = false, height }) {
 
 // ---------------------------------------------------------------- data panel
 
+const KINDS = [["swing", "Swing", "Bag"], ["pitching", "Pitching", "Wedge intents"], ["stack", "Stack", ""]];
+
 async function renderDatasets(datasets) {
   const parts = [];
   const warnings = [];
-  for (const [mode, label, tab] of [["swing", "Swing", "Bag"], ["pitching", "Pitching", "Wedge intents"]]) {
+  for (const [mode, label, tab] of KINDS) {
     const d = datasets[mode];
-    $(mode === "swing" ? "swing-dir" : "pitching-dir").value = d.folder;
+    $(mode + "-dir").value = d.folder;
+    if (!d.enabled) { parts.push(`${label}: no folder chosen`); continue; }
     if (!d.loaded) { parts.push(`${label}: not loaded (${d.error || "no data"})`); continue; }
     const used = d.sessions_selected === d.sessions ? `${d.sessions} sessions` : `${d.sessions_selected} of ${d.sessions} sessions selected`;
     parts.push(`${label}: ${d.files} files, ${d.shots.toLocaleString()} shots, ${used}, last ${dateLabel(d.last_session)}`);
@@ -129,23 +132,49 @@ async function renderDatasets(datasets) {
       warnings.push(`${label}: ${d.not_in_bag.length} club(s) recorded but not selected: ${list}. Choose them in the ${tab} tab.`);
     }
     if (d.unreadable.length) {
-      warnings.push(`${label}: club labels that could not be read: ${d.unreadable.map((c) => c.raw_club).join(", ")}.`);
+      const what = mode === "stack" ? "weights that could not be read" : "club labels that could not be read";
+      warnings.push(`${label}: ${what}: ${d.unreadable.map((c) => c.raw_club).join(", ")}.`);
     }
   }
   $("data-status").textContent = parts.join("   |   ");
   $("warnings").innerHTML = warnings.map((w) => `<div class="warning">${w}</div>`).join("");
+  applyAvailability(datasets);
+}
+
+// Only the kinds of data that were loaded get tabs. A folder left empty means: not used.
+let available = {};
+
+function applyAvailability(datasets) {
+  const loaded = (mode) => Boolean(datasets[mode] && datasets[mode].loaded);
+  const any = loaded("swing") || loaded("pitching") || loaded("stack");
+  available = {
+    sessions: any, swing: loaded("swing"), bag: loaded("swing"),
+    pitching: loaded("pitching"), wedges: loaded("pitching"), stack: loaded("stack"),
+  };
+  document.querySelectorAll(".tab").forEach((tab) => (tab.hidden = !available[tab.dataset.tab]));
+  $("tabs").hidden = !any;
+  $("no-data").hidden = any;
+  for (const id of Object.keys(available)) if (!available[id]) $("tab-" + id).hidden = true;
+}
+
+function firstAvailableTab() {
+  return ["swing", "pitching", "stack", "sessions"].find((name) => available[name]);
 }
 
 async function loadData() {
-  const data = await api("/api/load", { body: { swing_dir: $("swing-dir").value.trim(), pitching_dir: $("pitching-dir").value.trim() } });
+  const body = {
+    swing_dir: $("swing-dir").value.trim(), pitching_dir: $("pitching-dir").value.trim(), stack_dir: $("stack-dir").value.trim(),
+  };
+  const data = await api("/api/load", { body });
   await renderDatasets(data.datasets);
-  await refreshAll();
+  const next = available[currentTab] ? currentTab : firstAvailableTab();
+  if (next) await showTab(next);
 }
 
 async function browse(mode) {
   const { folder } = await api("/api/browse", { body: { mode } });
   if (folder) {
-    $(mode === "swing" ? "swing-dir" : "pitching-dir").value = folder;
+    $(mode + "-dir").value = folder;
     await loadData();
   }
 }
@@ -366,18 +395,19 @@ async function pitchingLadder() {
 
 // ---------------------------------------------------------------- sessions
 
-const sessionRows = { swing: [], pitching: [] };
+const sessionRows = { swing: [], pitching: [], stack: [] };
 const sessionWeeks = { window: 4, fallback: 12 };
 const sessionTimer = {};
 
 async function loadSessions() {
-  for (const mode of ["swing", "pitching"]) {
+  for (const mode of ["swing", "pitching", "stack"]) {
     const d = await api("/api/sessions", { params: { mode } });
     sessionRows[mode] = d.sessions;
     if (d.loaded) { sessionWeeks.window = d.window_weeks; sessionWeeks.fallback = d.fallback_weeks; }
+    $("ss-card-" + mode).hidden = !d.loaded;
     renderSessions(mode);
   }
-  for (const mode of ["swing", "pitching"]) {
+  for (const mode of ["swing", "pitching", "stack"]) {
     $(`ss-${mode}-w1`).textContent = `Last ${sessionWeeks.window} weeks`;
     $(`ss-${mode}-w2`).textContent = `Last ${sessionWeeks.fallback} weeks`;
   }
@@ -393,7 +423,7 @@ function renderSessions(mode) {
   const body = rows.map((r) =>
     `<tr><td><input type="checkbox" data-mode="${mode}" data-date="${r.date}"${r.selected ? " checked" : ""}></td>` +
     `<td>${dateLabel(r.date)}</td><td>${r.shots}</td><td>${r.clubs}</td><td class="muted">${r.files.join(", ")}</td></tr>`).join("");
-  $(`ss-${mode}-table`).innerHTML = "<tr><th></th><th>Session</th><th>Shots</th><th>Clubs and intents</th><th>File</th></tr>" + body;
+  $(`ss-${mode}-table`).innerHTML = `<tr><th></th><th>Session</th><th>Shots</th><th>${mode === "stack" ? "Weights" : "Clubs and intents"}</th><th>File</th></tr>` + body;
 }
 
 function applySelection(mode, predicate) {
@@ -428,6 +458,36 @@ function sessionPreset(mode, preset) {
     const newest = new Set(rows.slice(0, n).map((r) => r.date));
     applySelection(mode, (r) => newest.has(r.date));
   }
+}
+
+// ---------------------------------------------------------------- stack
+
+// One marker shape per weight, so lines can be told apart without relying on colour alone.
+// Weights are numbered from the heaviest, so neighbouring weights never share a shape (12 shapes, then they repeat).
+const MARKER_SYMBOLS = [
+  "circle", "square", "diamond", "triangle-up", "triangle-down", "pentagon",
+  "hexagon", "star", "cross", "x", "triangle-left", "triangle-right",
+];
+
+// Heavy weights red, light weights blue.
+function weightColor(weight, lightest, heaviest) {
+  const t = heaviest > lightest ? (weight - lightest) / (heaviest - lightest) : 0.5;
+  return `hsl(${Math.round(210 - 210 * t)}, 70%, 52%)`;
+}
+
+async function loadStack() {
+  const d = await api("/api/stack/progress");
+  if (!d.series.length) {
+    draw("stack-progress", [], baseLayout({ annotations: [{ text: "No stack swings in the selected sessions", showarrow: false, font: { color: css("--muted") } }], xaxis: { visible: false }, yaxis: { visible: false } }));
+    return;
+  }
+  const weights = d.series.map((s) => s.weight);
+  const lightest = Math.min(...weights), heaviest = Math.max(...weights);
+  const series = d.series.map((s, i) => ({
+    name: s.name, color: weightColor(s.weight, lightest, heaviest), y: s.y, lo: s.lo, hi: s.hi, n: s.n,
+    symbol: MARKER_SYMBOLS[i % MARKER_SYMBOLS.length], size: 10,
+  }));
+  sessionChart("stack-progress", d.dates, series, { title: "Club head speed (mph)", band: false, height: 460 });
 }
 
 // ---------------------------------------------------------------- bag and wedge selection
@@ -510,7 +570,7 @@ async function makeCard(mode, prefix) {
 
 // ---------------------------------------------------------------- tabs and start
 
-const refreshers = { sessions: loadSessions, swing: loadSwing, pitching: loadPitching, bag: loadBag, wedges: loadWedges };
+const refreshers = { sessions: loadSessions, swing: loadSwing, pitching: loadPitching, stack: loadStack, bag: loadBag, wedges: loadWedges };
 
 async function showTab(name) {
   currentTab = name;
@@ -526,6 +586,7 @@ function wire() {
   $("load").addEventListener("click", guard(loadData));
   $("browse-swing").addEventListener("click", guard(() => browse("swing")));
   $("browse-pitching").addEventListener("click", guard(() => browse("pitching")));
+  $("browse-stack").addEventListener("click", guard(() => browse("stack")));
 
   for (const id of ["sw-session", "sw-baseline"]) $(id).addEventListener("change", guard(swingReview));
   for (const id of ["sw-club", "sw-metric"]) $(id).addEventListener("change", guard(swingProgress));
@@ -584,5 +645,6 @@ guard(async () => {
   wire();
   const state = await api("/api/state");
   await renderDatasets(state.datasets);
-  await showTab("swing");
+  const first = firstAvailableTab();
+  if (first) await showTab(first);
 })();
