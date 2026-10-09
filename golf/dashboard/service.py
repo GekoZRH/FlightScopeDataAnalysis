@@ -18,8 +18,9 @@ import numpy as np
 import pandas as pd
 
 from golf.bag import available_clubs, club_variant, intent_grid, select_bag, unlisted_clubs
-from golf.config import MODES, BagSpec, Config, load_config, update_local_settings
+from golf.config import FOLDER_KINDS, MODES, BagSpec, Config, load_config, update_local_settings
 from golf.data import load_shots, unparsed_labels, unreadable_weights
+from golf.data.garmin import GarminData, describe_garmin, find_export_folders, load_garmin
 from golf.data.stack import stack_files
 from golf.data.labels import FULL_SWING
 from golf.report.build import generate_card
@@ -28,6 +29,9 @@ from golf.stats import (
     COVERAGE_1S, COVERAGE_2S, compare_normal, describe, fit_bivariate, fit_univariate,
     session_summary,
 )
+from golf.stats.context import PREDICTORS, session_context
+from golf.stats.correlation import correlate
+from golf.stats.outcomes import stack_speed, swing_spread, swing_speed
 
 # What a session is compared with ("historic"):
 #   last4     the 4 sessions before it, among all loaded sessions (selected or not)
@@ -46,6 +50,7 @@ class AppState:
         self.lock = threading.RLock()
         self.config: Config = load_config(config_path)
         self.shots: Dict[str, Optional[pd.DataFrame]] = {mode: None for mode in MODES}
+        self.garmin: Optional[GarminData] = None
         self.errors: Dict[str, str] = {}
         self.reload_data()
 
@@ -53,6 +58,7 @@ class AppState:
         self.config = load_config(self.config_path)
 
     def reload_data(self, modes=MODES) -> None:
+        self.reload_garmin()
         for mode in modes:
             if self.config.data_dir(mode) is None:        # no folder chosen: this kind of data is not used
                 self.shots[mode] = None
@@ -64,6 +70,19 @@ class AppState:
             except (FileNotFoundError, ValueError, OSError) as error:
                 self.shots[mode] = None
                 self.errors[mode] = str(error)
+
+    def reload_garmin(self) -> None:
+        folder = self.config.garmin_dir
+        if folder is None:                                  # no folder chosen: the Garmin data is not used
+            self.garmin = None
+            self.errors.pop("garmin", None)
+            return
+        try:
+            self.garmin = load_garmin(folder)
+            self.errors.pop("garmin", None)
+        except (FileNotFoundError, ValueError, OSError) as error:
+            self.garmin = None
+            self.errors["garmin"] = str(error)
 
     def included(self, mode: str) -> Optional[pd.DataFrame]:
         """All shots of the sessions chosen on the Sessions tab (None if no data is loaded)."""
@@ -130,6 +149,13 @@ def dataset_info(state: AppState) -> Dict:
             "unreadable": problems.to_dict("records"),
             "not_in_bag": extra.to_dict("records"),
         }
+    garmin_folder = state.config.garmin_dir
+    if garmin_folder is None:
+        info["garmin"] = {"folder": "", "enabled": False, "loaded": False, "error": ""}
+    elif state.garmin is None:
+        info["garmin"] = {"folder": str(garmin_folder), "enabled": True, "loaded": False, "error": state.errors.get("garmin", "")}
+    else:
+        info["garmin"] = {"folder": str(garmin_folder), "enabled": True, "loaded": True, **describe_garmin(state.garmin)}
     return clean(info)
 
 
@@ -140,7 +166,7 @@ def set_folders(state: AppState, folders: Dict[str, Optional[str]]) -> Dict:
     A kind that is not in `folders` keeps its folder.
     """
     patch = {}
-    for mode in MODES:
+    for mode in FOLDER_KINDS:
         if mode not in folders or folders[mode] is None:
             continue
         value = str(folders[mode]).strip()
@@ -150,8 +176,9 @@ def set_folders(state: AppState, folders: Dict[str, Optional[str]]) -> Dict:
         folder = Path(value).expanduser()
         if not folder.is_dir():
             raise ValueError(f"{value} is not a folder")
-        has_files = bool(stack_files(folder)) if mode == "stack" else any(folder.glob("*.csv"))
-        if not has_files:
+        if mode == "garmin":
+            find_export_folders(folder)                       # raises if this is not a Garmin export
+        elif not (bool(stack_files(folder)) if mode == "stack" else any(folder.glob("*.csv"))):
             raise ValueError(f"No CSV files found in {value}")
         patch[f"{mode}_dir"] = str(folder)
     with state.lock:
@@ -572,6 +599,106 @@ def stack_progress(state: AppState) -> Dict:
         })
     series.sort(key=lambda item: -item["weight"])
     return clean({"dates": dates, "series": series})
+
+
+# --- Garmin: what goes with a good session -----------------------------------------------------
+
+# result key -> (menu title, kind of practice data it needs)
+OUTCOMES = {
+    "stack_speed": ("Stack training: speed", "stack"),
+    "swing_speed": ("Full swing: club head speed", "swing"),
+    "swing_spread": ("Full swing: carry spread", "swing"),
+}
+
+
+def _garmin_ready(state: AppState, outcome: str) -> None:
+    if state.garmin is None:
+        raise ValueError("No Garmin data is loaded")
+    if outcome not in OUTCOMES:
+        raise ValueError(f"Unknown result: {outcome}")
+    needed = OUTCOMES[outcome][1]
+    if state.included(needed) is None:
+        raise ValueError(f"No {needed} data is loaded")
+
+
+def garmin_overview(state: AppState) -> Dict:
+    """What the correlation tab can offer: the results, the Garmin measures and the clubs."""
+    if state.garmin is None:
+        return {"loaded": False, "outcomes": [], "predictors": [], "clubs": []}
+    available = {kind: state.included(kind) is not None for kind in ("swing", "stack")}
+    swing = state.selected("swing")
+    return clean({
+        "loaded": True,
+        "outcomes": [{"key": key, "title": title, "source": source} for key, (title, source) in OUTCOMES.items() if available[source]],
+        "predictors": [{"key": key, "title": title, "group": group} for key, (title, group) in PREDICTORS.items()],
+        "clubs": list(dict.fromkeys(swing["label"])) if not swing.empty else [],
+        "timezone": state.config.timezone,
+    })
+
+
+def _session_results(state: AppState, outcome: str, club: Optional[str], detrend: bool):
+    """One result per session (see golf.stats.outcomes), the local time of each session's first swing, and a title."""
+    _garmin_ready(state, outcome)
+    if outcome == "stack_speed":
+        shots = state.included("stack").dropna(subset=["weight_g", "club_speed_mph"])
+        results = stack_speed(shots, detrend=detrend)
+        reference = f"{results['weight'].iloc[0]:g} g" if not results.empty else "one weight"
+        title = (f"Stack speed compared with the trend, at {reference} (mph)" if detrend else f"Stack speed at {reference} (mph)")
+    else:
+        shots = state.selected("swing")
+        if club and club not in set(shots["label"]):
+            raise ValueError(f"Unknown club: {club}")
+        what, function = ("Club head speed", swing_speed) if outcome == "swing_speed" else ("Carry spread", swing_spread)
+        results = function(shots, detrend=detrend, club=club or None)
+        title = f"{what} compared with the {'trend' if detrend else 'usual'} (%)" + (f", {club}" if club else "")
+    starts = shots.groupby("session_date")["timestamp"].min()
+    return results, starts, title
+
+
+def _joined(state: AppState, outcome: str, club: Optional[str], detrend: bool):
+    results, starts, title = _session_results(state, outcome, club, detrend)
+    if results.empty:
+        return pd.DataFrame(), title
+    context = session_context(starts.loc[results["date"]], state.garmin, state.config.timezone)
+    joined = results.set_index("date").join(context)
+    return joined, title
+
+
+def garmin_table(state: AppState, outcome: str, club: Optional[str] = None, detrend: bool = True) -> Dict:
+    """Every Garmin measure against one result: the correlation and how uncertain it is."""
+    joined, title = _joined(state, outcome, club, detrend)
+    level = state.config.stats.ci_level
+    rows = []
+    for key, (name, group) in PREDICTORS.items():
+        c = correlate(joined[key], joined["value"], level=level) if not joined.empty else None
+        valid = int(joined[key].notna().sum()) if not joined.empty else 0
+        rows.append({
+            "key": key, "title": name, "group": group, "n": c.n if c else valid,
+            "r": c.r if c else None, "low": c.low if c else None, "high": c.high if c else None,
+        })
+    rows.sort(key=lambda row: (row["r"] is None, -abs(row["r"] or 0.0)))
+    tested = [row for row in rows if row["r"] is not None]
+    return clean({
+        "title": title, "sessions": int(len(joined)), "rows": rows, "level": level,
+        "tested": len(tested), "clear": sum(1 for row in tested if row["low"] > 0 or row["high"] < 0),
+    })
+
+
+def garmin_scatter(state: AppState, outcome: str, predictor: str, club: Optional[str] = None, detrend: bool = True) -> Dict:
+    """One Garmin measure against one result, one dot per session."""
+    if predictor not in PREDICTORS:
+        raise ValueError(f"Unknown Garmin measure: {predictor}")
+    joined, title = _joined(state, outcome, club, detrend)
+    points = []
+    if not joined.empty:
+        used = joined.dropna(subset=[predictor])
+        points = [{"date": str(day), "x": row[predictor], "y": row["value"]} for day, row in used.iterrows()]
+    c = correlate([p["x"] for p in points], [p["y"] for p in points], level=state.config.stats.ci_level)
+    fit = None if c is None else {"n": c.n, "r": c.r, "low": c.low, "high": c.high, "slope": c.slope, "intercept": c.intercept}
+    return clean({
+        "x_title": PREDICTORS[predictor][0], "y_title": title, "points": points, "fit": fit,
+        "sessions": int(len(joined)), "level": state.config.stats.ci_level,
+    })
 
 
 # --- sessions -------------------------------------------------------------------------------------

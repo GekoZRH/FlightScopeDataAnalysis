@@ -5,3 +5,4 @@ scipy>=1.14
 matplotlib>=3.9
 plotly>=6.0
 pytest>=8.0
+tzdata>=2024.1      # time zones on Windows

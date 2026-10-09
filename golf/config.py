@@ -23,6 +23,9 @@ LOCAL_SETTINGS_NAME = "golf.local.json"
 # The kinds of data. A data folder can be left empty for any of them; that kind is then not used.
 MODES = ("swing", "pitching", "stack")
 BAG_MODES = ("swing", "pitching")      # the kinds that have a bag and a printed card
+# Every data folder the dashboard knows. "garmin" is not practice data: it is the watch data that the
+# practice results are related to.
+FOLDER_KINDS = MODES + ("garmin",)
 
 
 @dataclass(frozen=True)
@@ -85,6 +88,8 @@ class Config:
     stats: StatsSettings = field(default_factory=StatsSettings)
     cards: Dict[str, CardSpec] = field(default_factory=dict)
     stack_dir: Optional[Path] = None
+    garmin_dir: Optional[Path] = None
+    timezone: str = "Europe/Zurich"     # where the practice took place, to line it up with the watch (which uses UTC)
     default_bag: Dict[str, BagSpec] = field(default_factory=dict)   # golf.toml, before local choices
     excluded_sessions: Dict[str, frozenset] = field(default_factory=dict)   # mode -> session dates left out
     local_path: Optional[Path] = None
@@ -97,7 +102,9 @@ class Config:
             return self.pitching_dir
         if mode == "stack":
             return self.stack_dir
-        raise ValueError(f"Unknown mode {mode!r}, expected one of {MODES}")
+        if mode == "garmin":
+            return self.garmin_dir
+        raise ValueError(f"Unknown kind of data {mode!r}, expected one of {FOLDER_KINDS}")
 
     def cards_dir(self, mode: str) -> Path:
         """Folder for the cards of the data set currently loaded for `mode`.
@@ -182,6 +189,7 @@ def load_config(path: Optional[Path] = None, local_path: Optional[Path] = None) 
     swing_dir = _folder(root, local.get("swing_dir", paths.get("swing_dir")))
     pitching_dir = _folder(root, local.get("pitching_dir", paths.get("pitching_dir")))
     stack_dir = _folder(root, local.get("stack_dir", paths.get("stack_dir")))
+    garmin_dir = _folder(root, local.get("garmin_dir", paths.get("garmin_dir")))
     # Sessions left out are remembered per data folder, so another folder starts with all sessions.
     excluded = {
         mode: frozenset(local.get("sessions", {}).get(mode, {}).get(str(folder), {}).get("excluded", []))
@@ -194,6 +202,8 @@ def load_config(path: Optional[Path] = None, local_path: Optional[Path] = None) 
         swing_dir=swing_dir,
         pitching_dir=pitching_dir,
         stack_dir=stack_dir,
+        garmin_dir=garmin_dir,
+        timezone=str(raw.get("garmin", {}).get("timezone", "Europe/Zurich")),
         output_dir=root / paths["output_dir"],
         label_aliases=dict(aliases.get("label", {})),
         variant_aliases=dict(aliases.get("variant", {})),

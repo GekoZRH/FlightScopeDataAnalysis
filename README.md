@@ -1,8 +1,8 @@
 # Golf practice analysis
 
-Analysis of FlightScope indoor practice sessions and of stack (overspeed) training, in two parts:
+Analysis of FlightScope indoor practice sessions and of stack (overspeed) training, in two parts, plus an optional look at how your sleep and training (from a Garmin watch) relate to your results:
 
-- **A dashboard** to review the latest session, follow your progress over time, and see how your carry and your misses are distributed, for full swings and for wedge swings with different intents (9, 10, 11 o'clock), and the progress of your stack training per weight.
+- **A dashboard** to review the latest session, follow your progress over time, and see how your carry and your misses are distributed, for full swings and for wedge swings with different intents (9, 10, 11 o'clock), and the progress of your stack training per weight. The **Garmin** tab relates your results to sleep, recovery and strength or cardio training before each session.
 - **Printed cards** with the carry distance of each club and its distribution, to take to the course.
 
 Everything runs on your own computer. The data never leaves it.
@@ -43,6 +43,7 @@ After a practice session:
 | `golf.toml` | Default settings, committed |
 | `golf.local.json` | Your own choices from the dashboard (folders, sessions, bag). Created automatically, not committed |
 | `SwingData/`, `PitchingData/`, `stackdata/` | Your exported sessions (the folders can be anywhere; these are the defaults). Not committed |
+| `garmindata/` | Your Garmin data export, unzipped (optional). Not committed |
 | `Output/` | Generated cards. Not committed |
 | `Analysis_legacy/` | The original scripts, kept for comparison until the new code is trusted |
 

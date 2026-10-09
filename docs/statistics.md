@@ -76,6 +76,20 @@ Both use all shots of the ticked sessions and the ticked wedges and intents.
 
 The optional **fit line** is an ordinary least-squares line through all plotted shots, and the note gives the **correlation r** (Pearson). The shots of all intents are pooled, so the line mostly reflects that harder swings go further; the relation within one intent can be flatter or even different. Use the colours to judge that.
 
+## Garmin: results against sleep and training
+
+**One number per session for the result.** Each result is reduced to one value per practice day:
+
+- *Stack speed*: club head speed at one reference weight. Within a session the speed falls as the weight rises, so the session's slope of speed against weight is estimated from all its swings, and every session is moved to the reference weight (the weight used in most sessions; the heaviest if tied). This way a session where you used lighter weights does not look faster.
+- *Full swing club head speed*: for each club the deviation of the session mean from the club's usual speed in per cent, averaged over the clubs hit that day (clubs seen in one session only are dropped). This way a day with more short irons is not 'slower'.
+- *Full swing carry spread*: the standard deviation of carry of the session (at least 5 shots, at least 3 per club), as a per cent deviation from usual in the same way.
+
+**Removing the trend.** With the switch on, 'usual' is not your overall mean but a straight line through the sessions in time (needs at least 4 sessions, otherwise the mean is used), so what remains is the day-to-day deviation from where you were heading. Without it, anything that changed slowly over the months, such as your speed, your gym routine or your sleep, will correlate with everything else. Example from real data: stack speed against 'strength training in the last 24 hours' was strongly negative without the trend removed, because the early (slower) sessions simply happened closer to training days.
+
+**The correlation.** Pearson's r between the Garmin measure and the result over the sessions. The interval is the 95% interval from the Fisher z-transformation (`atanh(r)` plus or minus 1.96 / sqrt(n - 3)). With 8 sessions it is very wide (for r = 0.78 about 0.16 to 0.96). At least 5 sessions with a value are required, and a measure that never varies has no correlation. 'Clear' means that the interval does not contain zero.
+
+**What it cannot tell you.** It is an association, not a cause. There are many measures and only a handful of sessions, so some will look clear by chance; the page shows how many to expect (number of measures times 0.05). Measures are not independent of each other (deep sleep goes with sleep duration), so two clear rows may be one effect. Practice sessions are not randomly scheduled either: you may practise more after a good night because you feel good.
+
 ## Settings that change the numbers
 
 | Setting | Effect |
@@ -83,7 +97,7 @@ The optional **fit line** is an ordinary least-squares line through all plotted 
 | `min_shots` (12) | Cards mark clubs with fewer shots with a `*` |
 | `min_shots_skew` (25), `skew_alpha` (0.05) | When a skewed distribution is used |
 | `min_shots_session` (5) | Smallest session for rings and for tighter/broader labels |
-| `ci_level` (0.95) | Level of the intervals in the progress charts |
+| `ci_level` (0.95) | Level of the intervals in the progress charts and of the Garmin correlations |
 
 ## Things to keep in mind
 

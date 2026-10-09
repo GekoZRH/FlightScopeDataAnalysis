@@ -31,6 +31,22 @@ Stack (overspeed) training is exported by the simulator as a CSV file with fewer
 - The training app saves one folder per session (with the CSV and a screenshot). Both layouts are read: CSV files directly in the stack folder, or one folder level below it.
 - Time, left and right (`2.5 R`, `1.0 L`) and the repeated header rules are the same as for the other files. A swing without plane values is kept (its club speed is valid).
 
+## Garmin export
+
+Garmin lets you download all your data (Garmin account, *Data Management*, *Export your data*). They e-mail a zip file. Unzip it into a folder, for example `garmindata`, and choose that folder in the dashboard. The folder may be the unzipped root, its `DI_CONNECT` folder, or the folder that holds `DI-Connect-Wellness` and `DI-Connect-Fitness`. No login or internet connection is needed.
+
+What is read (everything else, which is a lot, is ignored):
+
+| Files | What is used |
+|---|---|
+| `DI-Connect-Wellness/*_sleepData.json` | Each night: start and end, time asleep, deep, light, REM and awake time, sleep score |
+| `DI-Connect-Wellness/*_healthStatusData.json` | Overnight heart rate variability and heart rate |
+| `DI-Connect-Fitness/*_summarizedActivities.json` | Activities: type, start, duration, average heart rate, training load, sets and repetitions. Strength training is `strength_training`; running, cycling, swimming, hiking, rowing, elliptical, stair climbing and indoor cardio count as cardio (the list `CARDIO_TYPES` is in `golf/data/garmin.py`; walking does not). Everything else (including golf) is ignored |
+
+- Garmin stores times in UTC. They are converted with the time zone in `golf.toml` (`[garmin] timezone`, default `Europe/Zurich`), including the change between summer and winter time. The first swing of a session is taken from the `Time` column of your CSV files, which is local time.
+- A night appears once even if several files hold it. A session without a recorded night has no sleep values; it is simply left out of the comparisons that need them.
+- The export is large (it can hold years of data and be over 100 MB) but it is only read when you press Load data, and it never leaves your computer. `garmindata/` is ignored by git.
+
 ## How club names are read
 
 The `Club` text is split into **club**, **variant** and **intent**.
@@ -72,7 +88,8 @@ The file is in the project folder and is committed to git. Relative paths are re
 
 | Section | Setting | Meaning |
 |---|---|---|
-| `[paths]` | `swing_dir`, `pitching_dir`, `stack_dir` | Data folders used until you choose others in the dashboard. An empty value (`""`) means: no data of that kind |
+| `[paths]` | `swing_dir`, `pitching_dir`, `stack_dir`, `garmin_dir` | Data folders used until you choose others in the dashboard. An empty value (`""`) means: no data of that kind |
+| `[garmin]` | `timezone` | Your local time zone, to turn Garmin's UTC times into local times (default `Europe/Zurich`) |
 | | `output_dir` | Where cards are written (default `Output`) |
 | `[stats]` | `window_weeks`, `fallback_weeks` | The two "Last N weeks" quick buttons on the Sessions tab (4 and 12) |
 | | `min_shots` | Fewer shots than this for a club on a card get a `*` (12) |
@@ -96,6 +113,7 @@ The dashboard writes everything you choose to `golf.local.json`, next to `golf.t
   "swing_dir": "C:\\data\\SwingData\\Indoor",
   "pitching_dir": "C:\\data\\PitchingData\\Indoor",
   "stack_dir": "",
+  "garmin_dir": "C:\\data\\garmindata",
   "sessions": {
     "swing": {
       "C:\\data\\SwingData\\Indoor": { "excluded": ["2026-03-14", "2026-03-15"] }
@@ -108,7 +126,7 @@ The dashboard writes everything you choose to `golf.local.json`, next to `golf.t
 }
 ```
 
-- A folder set to `""` (as `stack_dir` above) means you chose to have no data of that kind; the dashboard then does not use it. A kind that is not listed uses the default from `golf.toml`.
+- A folder set to `""` (as `stack_dir` above; `garmin_dir` works the same way) means you chose to have no data of that kind; the dashboard then does not use it. A kind that is not listed uses the default from `golf.toml`.
 - `sessions` stores the sessions you left out, per data folder (for full swing, pitching and stack). Sessions you add later are not in the list, so they take part automatically.
 - `bag.swing.clubs` is always put in the standard order (driver, woods, hybrids, irons, wedges).
 - `bag.pitching.pairs` are (wedge, intent) combinations, with 12 meaning a full swing.

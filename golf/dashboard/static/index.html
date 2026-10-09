@@ -26,6 +26,11 @@
       <input type="text" id="stack-dir" spellcheck="false" placeholder="no stack data">
       <button id="browse-stack" type="button">Browse</button>
     </div>
+    <div class="folder-row">
+      <label for="garmin-dir">Garmin data</label>
+      <input type="text" id="garmin-dir" spellcheck="false" placeholder="no Garmin data (the extracted Garmin export)">
+      <button id="browse-garmin" type="button">Browse</button>
+    </div>
     <div class="row between">
       <div class="muted" id="data-status">Loading…</div>
       <button id="load" type="button">Load data</button>
@@ -36,7 +41,7 @@
 
   <div class="card" id="no-data" hidden>
     <h2>No data yet</h2>
-    <p class="muted">Enter the folder with your exported sessions above (full swing, pitching and stack data) and press Load data. You only need the kinds of data you have; leave the other folders empty.</p>
+    <p class="muted">Enter the folder with your exported sessions above (full swing, pitching or stack data) and press Load data. You only need the kinds of data you have; leave the other folders empty. Garmin data on its own is not enough: it is compared with your practice results.</p>
   </div>
 
   <nav class="tabs" role="tablist" id="tabs">
@@ -44,6 +49,7 @@
     <button class="tab on" data-tab="swing" role="tab">Full swing</button>
     <button class="tab" data-tab="pitching" role="tab">Pitching</button>
     <button class="tab" data-tab="stack" role="tab">Stack</button>
+    <button class="tab" data-tab="garmin" role="tab">Garmin</button>
     <span class="grow"></span>
     <button class="tab" data-tab="bag" role="tab">Bag</button>
     <button class="tab" data-tab="wedges" role="tab">Wedge intents</button>
@@ -251,6 +257,41 @@
       </div>
       <div id="stack-progress" class="plot tall"></div>
       <p class="muted small">Average club head speed of all swings with that weight in each selected session. A weight has a point only in the sessions in which it was used, and its line continues across the others. Heavy weights are red, light weights blue, and every weight has its own marker shape. Hover a point for the number of swings and the 95% interval.</p>
+    </div>
+  </section>
+
+  <section id="tab-garmin" hidden>
+    <div class="card">
+      <div class="row between">
+        <h2>What goes with a good session?</h2>
+        <div class="controls">
+          <label>Result <select id="gm-outcome"></select></label>
+          <label id="gm-club-label">Club <select id="gm-club"></select></label>
+          <label><input type="checkbox" id="gm-detrend" checked> Remove my improvement trend</label>
+        </div>
+      </div>
+      <p class="muted small" style="margin:0 0 6px">Each Garmin measure against the result of your practice sessions. A dot is a correlation with the bar showing how uncertain it is: a bar that crosses zero means the data cannot tell a link from chance. Click a row to see its sessions below.</p>
+      <div id="gm-forest" class="plot tall"></div>
+      <p class="muted small" id="gm-forest-note"></p>
+    </div>
+
+    <div class="card">
+      <div class="row between">
+        <h2>One Garmin measure against the result</h2>
+        <div class="controls"><label>Garmin measure <select id="gm-predictor"></select></label></div>
+      </div>
+      <div id="gm-plot" class="plot tall"></div>
+      <p class="muted small" id="gm-note"></p>
+    </div>
+
+    <div class="card">
+      <h2>How to read this</h2>
+      <ul class="muted small" style="margin:6px 0 0;padding-left:20px">
+        <li>The result of a session is compared with your usual level (for stack training at one weight, for the full swing per club), so sessions with different clubs and weights can be put side by side.</li>
+        <li>With "Remove my improvement trend" ticked, each session is compared with where your trend line says you should be at that time. Without it, anything that simply changed over the weeks (such as lifting more or less) can look like a cause of your improvement.</li>
+        <li>Only what the watch recorded before the first swing is used.</li>
+        <li>Few sessions mean wide bars. Among many measures, a few will look clear by chance: roughly one in twenty. Treat a single clear bar as a hint to watch, not as proof.</li>
+      </ul>
     </div>
   </section>
 

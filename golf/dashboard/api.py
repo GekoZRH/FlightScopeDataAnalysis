@@ -24,7 +24,7 @@ def _state(state: AppState, query, body):
 
 
 def _load(state: AppState, query, body):
-    folders = {mode: body[f"{mode}_dir"] for mode in service.MODES if f"{mode}_dir" in body}
+    folders = {kind: body[f"{kind}_dir"] for kind in service.FOLDER_KINDS if f"{kind}_dir" in body}
     return {"datasets": service.set_folders(state, folders)}
 
 
@@ -53,6 +53,10 @@ GET: Dict[str, Callable] = {
     "/api/pitching/ladder": lambda s, q, b: service.ladder(s, float(q.get("target", 70)), float(q.get("tolerance", 3))),
     "/api/stack/overview": lambda s, q, b: service.stack_overview(s),
     "/api/stack/progress": lambda s, q, b: service.stack_progress(s),
+    "/api/garmin/overview": lambda s, q, b: service.garmin_overview(s),
+    "/api/garmin/table": lambda s, q, b: service.garmin_table(s, _first(q, "outcome"), q.get("club") or None, q.get("detrend", "1") == "1"),
+    "/api/garmin/scatter": lambda s, q, b: service.garmin_scatter(
+        s, _first(q, "outcome"), _first(q, "predictor"), q.get("club") or None, q.get("detrend", "1") == "1"),
     "/api/sessions": lambda s, q, b: service.get_sessions(s, _first(q, "mode")),
     "/api/bag": lambda s, q, b: service.get_bag(s),
     "/api/wedges": lambda s, q, b: service.get_wedges(s),

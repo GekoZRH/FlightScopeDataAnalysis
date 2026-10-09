@@ -4,7 +4,7 @@
 
 ```
 conda activate golf            # Python 3.13; Python >= 3.11 is needed (tomllib)
-python -m pytest               # about 170 tests, roughly 45 seconds
+python -m pytest               # about 210 tests, roughly a minute
 ```
 
 `requirements.txt` lists the packages. The tests use made-up data in temporary folders and their own copy of the configuration, so they neither need your CSV files nor change your settings. A few extra checks run against your real data and are skipped when it is absent. The web server tests start a server on a free port.
@@ -23,6 +23,7 @@ golf/
     columns.py            raw CSV columns -> fixed names and units
     load.py               read the files into one table, one row per shot
     stack.py              stack sessions: the weight is read from the Club column
+    garmin.py             Garmin export: nights, overnight vitals, activities
   stats/
     univariate.py         normal / skew-normal fit and ranges
     bivariate.py          joint lateral-carry model (Gaussian copula)
@@ -30,6 +31,9 @@ golf/
     sessions.py           per-session statistics
     compare.py            exact and bootstrap comparisons of two samples
     summary.py            describe() and card_table()
+    outcomes.py           one result number per session (stack speed, swing speed, carry spread), trend removal
+    context.py            what Garmin recorded before each session (sleep, vitals, strength, cardio)
+    correlation.py        Pearson r with Fisher z interval
   report/
     cards.py              draws a card (matplotlib)
     build.py              chooses the shots, draws and saves the card
@@ -38,7 +42,7 @@ golf/
     api.py                one function per URL, user errors become ApiError
     server.py             small local web server (standard library)
     static/               index.html, app.js, app.css (Plotly is served from the installed package)
-tests/                    labels, columns, loading, statistics, cards, dashboard
+tests/                    labels, columns, loading, statistics, cards, dashboard, stack, garmin, correlations
 docs/                     this documentation
 Analysis_legacy/          the original scripts
 ```
@@ -64,7 +68,9 @@ The page talks to the server with JSON. Requests carry the current choices; noth
 | URL | Method | Purpose |
 |---|---|---|
 | `/api/state` | GET | Folders, file and shot counts, notes about unselected clubs; `enabled` is false for a kind without a folder |
-| `/api/load` | POST | Set the data folders (`swing_dir`, `pitching_dir`, `stack_dir`) and reload. An empty value turns that kind off; a key that is left out keeps its folder |
+| `/api/load` | POST | Set the data folders (`swing_dir`, `pitching_dir`, `stack_dir`, `garmin_dir`) and reload. An empty value turns that kind off; a key that is left out keeps its folder |
+| `/api/garmin/overview` | GET | Outcomes, clubs and predictors for the Garmin tab; says whether data and sessions suffice |
+| `/api/garmin/table`, `/api/garmin/scatter` | GET | Correlation per Garmin measure; the points and fit of one of them (`outcome`, `club`, `detrend` 1 or 0, and `predictor` for the scatter) |
 | `/api/stack/overview`, `/api/stack/progress` | GET | The selected stack sessions and weights; club head speed per session, one series per weight |
 | `/api/browse` | POST | Show the folder dialog and return the folder |
 | `/api/sessions` | GET, POST | List sessions with their selection; save the selection |
@@ -96,13 +102,15 @@ The server listens on `127.0.0.1` only. Because any web page you have open could
 | Read another CSV column | add it to `FIELDS` in `data/columns.py` (with its unit) |
 | Read a new kind of club name | `data/labels.py`, with a case in `tests/test_labels.py` |
 | Change the look of a card | constants at the top of `report/cards.py`, titles and notes in `golf.toml` |
+| Add a Garmin measure | add it to `PREDICTORS` and to `session_context()` in `stats/context.py`; the Garmin tab picks it up |
+| Add a result to explain | add it to `OUTCOMES` in `dashboard/service.py` and write its per-session function in `stats/outcomes.py` |
 | Change a threshold | `[stats]` in `golf.toml`, documented in `StatsSettings` in `config.py` |
 
 Write a test with the change. The dashboard tests build a small synthetic data set in `tests/test_dashboard.py` and are a good starting point.
 
 ## Git
 
-- Personal data never goes into git: `*.csv`, `SwingData/`, `PitchingData/`, `Plot/`, `Output/` and `golf.local.json` are ignored. If you really need a CSV in the repository (for example a small test file), add it with `git add -f`.
+- Personal data never goes into git: `*.csv`, `SwingData/`, `PitchingData/`, `stackdata/`, `garmindata/`, `Plot/`, `Output/` and `golf.local.json` are ignored. If you really need a CSV in the repository (for example a small test file), add it with `git add -f`.
 - `.gitattributes` keeps text files with the same line endings in the repository whatever the machine.
 - Local branches only so far; nothing has been pushed.
 

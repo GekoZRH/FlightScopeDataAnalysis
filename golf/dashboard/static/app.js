@@ -136,6 +136,11 @@ async function renderDatasets(datasets) {
       warnings.push(`${label}: ${what}: ${d.unreadable.map((c) => c.raw_club).join(", ")}.`);
     }
   }
+  const g = datasets.garmin;
+  $("garmin-dir").value = g.folder;
+  if (!g.enabled) parts.push("Garmin: no folder chosen");
+  else if (!g.loaded) parts.push(`Garmin: not loaded (${g.error || "no data"})`);
+  else parts.push(`Garmin: ${g.nights} nights, ${g.strength} strength and ${g.cardio} cardio sessions, up to ${dateLabel(g.last)}`);
   $("data-status").textContent = parts.join("   |   ");
   $("warnings").innerHTML = warnings.map((w) => `<div class="warning">${w}</div>`).join("");
   applyAvailability(datasets);
@@ -150,6 +155,7 @@ function applyAvailability(datasets) {
   available = {
     sessions: any, swing: loaded("swing"), bag: loaded("swing"),
     pitching: loaded("pitching"), wedges: loaded("pitching"), stack: loaded("stack"),
+    garmin: loaded("garmin") && (loaded("swing") || loaded("stack")),      // Garmin data is compared with practice results
   };
   document.querySelectorAll(".tab").forEach((tab) => (tab.hidden = !available[tab.dataset.tab]));
   $("tabs").hidden = !any;
@@ -164,6 +170,7 @@ function firstAvailableTab() {
 async function loadData() {
   const body = {
     swing_dir: $("swing-dir").value.trim(), pitching_dir: $("pitching-dir").value.trim(), stack_dir: $("stack-dir").value.trim(),
+    garmin_dir: $("garmin-dir").value.trim(),
   };
   const data = await api("/api/load", { body });
   await renderDatasets(data.datasets);
@@ -490,6 +497,87 @@ async function loadStack() {
   sessionChart("stack-progress", d.dates, series, { title: "Club head speed (mph)", band: false, height: 460 });
 }
 
+// ---------------------------------------------------------------- Garmin
+
+function garminParams() {
+  const outcome = $("gm-outcome").value;
+  const club = outcome.startsWith("swing") ? $("gm-club").value : "";
+  return { outcome, club, detrend: $("gm-detrend").checked ? "1" : "0" };
+}
+
+async function loadGarmin() {
+  const o = await api("/api/garmin/overview");
+  fillSelect($("gm-outcome"), o.outcomes.map((x) => x.key), o.outcomes.map((x) => x.title));
+  fillSelect($("gm-club"), ["", ...o.clubs], ["All clubs together", ...o.clubs]);
+  fillMeasureMenu($("gm-predictor"), o.predictors, "sleep_h");
+  await garminRefresh();
+}
+
+async function garminRefresh() {
+  $("gm-club-label").hidden = !$("gm-outcome").value.startsWith("swing");
+  await Promise.all([garminForest(), garminScatter()]);
+}
+
+let forestBound = false;
+
+async function garminForest() {
+  if (!$("gm-outcome").value) return;
+  const d = await api("/api/garmin/table", { params: garminParams() });
+  const rows = d.rows;
+  const names = rows.map((r) => `${r.title}  (n=${r.n})`);
+  const tested = rows.filter((r) => r.r !== null);
+  const accent = css("--accent");
+  const traces = [
+    {
+      x: tested.flatMap((r) => [r.low, r.high, null]), y: tested.flatMap((r) => [`${r.title}  (n=${r.n})`, `${r.title}  (n=${r.n})`, null]),
+      mode: "lines", line: { color: rgba("#378ADD", 0.45), width: 9 }, hoverinfo: "skip", showlegend: false,
+    },
+    {
+      x: tested.map((r) => r.r), y: tested.map((r) => `${r.title}  (n=${r.n})`), mode: "markers", showlegend: false,
+      marker: { size: 9, color: accent }, customdata: tested.map((r) => [r.key, r.low, r.high]),
+      hovertemplate: "r = %{x:.2f}  (%{customdata[1]:.2f} to %{customdata[2]:.2f})<extra></extra>",
+    },
+  ];
+  $("gm-forest").style.height = Math.max(300, 30 * rows.length + 90) + "px";
+  draw("gm-forest", traces, baseLayout({
+    margin: { l: 300, r: 16, t: 10, b: 44 },
+    xaxis: { title: { text: `Correlation with the result (r), with its ${Math.round(d.level * 100)}% interval` }, range: [-1, 1], zeroline: true, zerolinewidth: 2, showgrid: true },
+    yaxis: { type: "category", categoryorder: "array", categoryarray: names, autorange: "reversed", showgrid: true },
+  }));
+  if (!forestBound) {
+    forestBound = true;
+    $("gm-forest").on("plotly_click", (event) => {
+      const key = event.points[0].customdata && event.points[0].customdata[0];
+      if (key) { $("gm-predictor").value = key; guard(garminScatter)(); }
+    });
+  }
+  const chance = (1 - d.level) * d.tested;
+  $("gm-forest-note").textContent = `${d.title}. ${d.sessions} sessions. ${d.clear} of ${d.tested} measures have a bar that does not cross zero; `
+    + `with this many measures about ${chance.toFixed(1)} would do so by chance alone. Measures without a dot have fewer than 5 sessions with a value.`;
+}
+
+async function garminScatter() {
+  if (!$("gm-outcome").value || !$("gm-predictor").value) return;
+  const d = await api("/api/garmin/scatter", { params: { ...garminParams(), predictor: $("gm-predictor").value } });
+  const traces = [{
+    x: d.points.map((p) => p.x), y: d.points.map((p) => p.y), mode: "markers", showlegend: false,
+    marker: { size: 11, color: css("--accent") }, customdata: d.points.map((p) => dateLabel(p.date)),
+    hovertemplate: `${d.x_title}: %{x:.1f}<br>result: %{y:.1f}<br>%{customdata}<extra></extra>`,
+  }];
+  if (d.fit) {
+    const xs = d.points.map((p) => p.x);
+    const lo = Math.min(...xs), hi = Math.max(...xs);
+    traces.push({ x: [lo, hi], y: [d.fit.slope * lo + d.fit.intercept, d.fit.slope * hi + d.fit.intercept], mode: "lines",
+      line: { color: css("--muted"), dash: "dash", width: 2 }, hoverinfo: "skip", showlegend: false });
+  }
+  draw("gm-plot", traces, baseLayout({ xaxis: { title: { text: d.x_title }, showgrid: true }, yaxis: { title: { text: d.y_title }, showgrid: true, zeroline: true } }));
+  const pct = Math.round(d.level * 100);
+  $("gm-note").textContent = d.fit
+    ? `${d.fit.n} of ${d.sessions} sessions. Correlation r = ${d.fit.r.toFixed(2)}, ${pct}% interval ${d.fit.low.toFixed(2)} to ${d.fit.high.toFixed(2)}. `
+      + (d.fit.low < 0 && d.fit.high > 0 ? "The interval includes zero, so this could be chance." : "The interval does not include zero, but with many measures tried some will look like this by chance.")
+    : `${d.points.length} of ${d.sessions} sessions have this measure: too few, or no variation, for a correlation.`;
+}
+
 // ---------------------------------------------------------------- bag and wedge selection
 
 let bagClubs = [];
@@ -570,7 +658,7 @@ async function makeCard(mode, prefix) {
 
 // ---------------------------------------------------------------- tabs and start
 
-const refreshers = { sessions: loadSessions, swing: loadSwing, pitching: loadPitching, stack: loadStack, bag: loadBag, wedges: loadWedges };
+const refreshers = { sessions: loadSessions, swing: loadSwing, pitching: loadPitching, stack: loadStack, garmin: loadGarmin, bag: loadBag, wedges: loadWedges };
 
 async function showTab(name) {
   currentTab = name;
@@ -587,6 +675,9 @@ function wire() {
   $("browse-swing").addEventListener("click", guard(() => browse("swing")));
   $("browse-pitching").addEventListener("click", guard(() => browse("pitching")));
   $("browse-stack").addEventListener("click", guard(() => browse("stack")));
+  $("browse-garmin").addEventListener("click", guard(() => browse("garmin")));
+  for (const id of ["gm-outcome", "gm-club", "gm-detrend"]) $(id).addEventListener("change", guard(garminRefresh));
+  $("gm-predictor").addEventListener("change", guard(garminScatter));
 
   for (const id of ["sw-session", "sw-baseline"]) $(id).addEventListener("change", guard(swingReview));
   for (const id of ["sw-club", "sw-metric"]) $(id).addEventListener("change", guard(swingProgress));

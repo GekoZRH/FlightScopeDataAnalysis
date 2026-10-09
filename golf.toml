@@ -4,6 +4,7 @@
 swing_dir = "SwingData/Indoor"
 pitching_dir = "PitchingData/Indoor"
 stack_dir = "stackdata"        # one folder per session below it, or the CSV files directly in it
+garmin_dir = "garmindata"      # the extracted Garmin export folder (or its DI_CONNECT folder inside it)
 output_dir = "Output"
 
 [stats]
@@ -17,6 +18,9 @@ n_bootstrap = 2000
 min_shots_compare = 8     # shots per period needed to call a change
 min_shots_session = 5     # shots of one session needed to compare it with earlier sessions
 seed = 12345
+
+[garmin]
+timezone = "Europe/Zurich"     # time zone of your practice, to line it up with the watch data (kept in UTC)
 
 # Raw club labels are parsed into club / variant / intent.
 #   club    : driver, 3w, 4h, 8i, pw, gw, sw, lw ...

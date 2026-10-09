@@ -57,7 +57,7 @@ def world(tmp_path):
             (stack / name / "Clipboard01.png").write_bytes(b"not a csv")
 
     text = DEFAULT_CONFIG.read_text(encoding="utf-8")
-    for key, value in (("swing_dir", "swing"), ("pitching_dir", "pitching"), ("stack_dir", "stack"), ("output_dir", "out")):
+    for key, value in (("swing_dir", "swing"), ("pitching_dir", "pitching"), ("stack_dir", "stack"), ("garmin_dir", ""), ("output_dir", "out")):
         text = re.sub(rf'{key} = ".*"', f'{key} = "{value}"', text)
     (tmp_path / "golf.toml").write_text(text, encoding="utf-8")
     return tmp_path / "golf.toml"
