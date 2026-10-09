@@ -152,19 +152,20 @@ let available = {};
 function applyAvailability(datasets) {
   const loaded = (mode) => Boolean(datasets[mode] && datasets[mode].loaded);
   const any = loaded("swing") || loaded("pitching") || loaded("stack");
+  const anyData = any || loaded("garmin");                                  // Garmin alone has its own tab
   available = {
     sessions: any, swing: loaded("swing"), bag: loaded("swing"),
     pitching: loaded("pitching"), wedges: loaded("pitching"), stack: loaded("stack"),
-    garmin: loaded("garmin") && (loaded("swing") || loaded("stack")),      // Garmin data is compared with practice results
+    garmin: loaded("garmin"),
   };
   document.querySelectorAll(".tab").forEach((tab) => (tab.hidden = !available[tab.dataset.tab]));
-  $("tabs").hidden = !any;
-  $("no-data").hidden = any;
+  $("tabs").hidden = !anyData;
+  $("no-data").hidden = anyData;
   for (const id of Object.keys(available)) if (!available[id]) $("tab-" + id).hidden = true;
 }
 
 function firstAvailableTab() {
-  return ["swing", "pitching", "stack", "sessions"].find((name) => available[name]);
+  return ["swing", "pitching", "stack", "sessions", "garmin"].find((name) => available[name]);
 }
 
 async function loadData() {
@@ -507,10 +508,17 @@ function garminParams() {
 
 async function loadGarmin() {
   const o = await api("/api/garmin/overview");
+  const compared = o.outcomes.length > 0;                                   // Garmin alone: only the plot of the Garmin measures
+  for (const id of ["gm-results-card", "gm-scatter-card", "gm-howto-card"]) $(id).hidden = !compared;
   fillSelect($("gm-outcome"), o.outcomes.map((x) => x.key), o.outcomes.map((x) => x.title));
   fillSelect($("gm-club"), ["", ...o.clubs], ["All clubs together", ...o.clubs]);
   fillMeasureMenu($("gm-predictor"), o.predictors, "sleep_h");
-  await garminRefresh();
+  fillMeasureMenu($("gp-x"), o.daily, "strength_min_24h");
+  fillMeasureMenu($("gp-y"), o.daily, "sleep_score");
+  const periods = [["all", "All nights"], ...o.days.map((n) => [`days:${n}`, n === 90 ? "Last 3 months" : n === 365 ? "Last 12 months" : `Last ${n} days`]),
+    ...o.years.map((y) => [`year:${y}`, String(y)])];
+  fillSelect($("gp-period"), periods.map((p) => p[0]), periods.map((p) => p[1]));
+  await Promise.all([compared ? garminRefresh() : null, garminPair()]);
 }
 
 async function garminRefresh() {
@@ -576,6 +584,33 @@ async function garminScatter() {
     ? `${d.fit.n} of ${d.sessions} sessions. Correlation r = ${d.fit.r.toFixed(2)}, ${pct}% interval ${d.fit.low.toFixed(2)} to ${d.fit.high.toFixed(2)}. `
       + (d.fit.low < 0 && d.fit.high > 0 ? "The interval includes zero, so this could be chance." : "The interval does not include zero, but with many measures tried some will look like this by chance.")
     : `${d.points.length} of ${d.sessions} sessions have this measure: too few, or no variation, for a correlation.`;
+}
+
+async function garminPair() {
+  if (!$("gp-x").value || !$("gp-y").value) return;
+  const d = await api("/api/garmin/pair", { params: { x: $("gp-x").value, y: $("gp-y").value, period: $("gp-period").value } });
+  const times = d.points.map((p) => Date.parse(p.date));
+  const first = Math.min(...times), last = Math.max(...times);
+  const ticks = times.length ? [0, 1, 2, 3].map((i) => first + ((last - first) * i) / 3) : [];
+  const traces = [{
+    x: d.points.map((p) => p.x), y: d.points.map((p) => p.y), mode: "markers", showlegend: false,
+    marker: { size: 7, color: times, colorscale: "Viridis", opacity: 0.75, colorbar: { thickness: 10, len: 0.8, tickvals: ticks, ticktext: ticks.map((v) => dateLabel(new Date(v).toISOString().slice(0, 10))), tickfont: { size: 10 } } },
+    customdata: d.points.map((p) => dateLabel(p.date)),
+    hovertemplate: `${d.x_title}: %{x:.1f}<br>${d.y_title}: %{y:.1f}<br>%{customdata}<extra></extra>`,
+  }];
+  if (d.fit) {
+    const xs = d.points.map((p) => p.x);
+    const lo = Math.min(...xs), hi = Math.max(...xs);
+    traces.push({ x: [lo, hi], y: [d.fit.slope * lo + d.fit.intercept, d.fit.slope * hi + d.fit.intercept], mode: "lines",
+      line: { color: css("--muted"), dash: "dash", width: 2 }, hoverinfo: "skip", showlegend: false });
+  }
+  draw("gp-plot", traces, baseLayout({ xaxis: { title: { text: d.x_title }, showgrid: true }, yaxis: { title: { text: d.y_title }, showgrid: true } }));
+  const pct = Math.round(d.level * 100);
+  $("gp-note").textContent = $("gp-x").value === $("gp-y").value ? "Choose two different measures."
+    : d.fit
+    ? `${d.fit.n} of ${d.nights} nights (${dateLabel(d.first)} to ${dateLabel(d.last)}). Correlation r = ${d.fit.r.toFixed(2)}, ${pct}% interval ${d.fit.low.toFixed(2)} to ${d.fit.high.toFixed(2)}. `
+      + "A correlation shows that two measures go together, not that one causes the other."
+    : `${d.points.length} of ${d.nights} nights have both measures: too few, or no variation, for a correlation.`;
 }
 
 // ---------------------------------------------------------------- bag and wedge selection
@@ -678,6 +713,7 @@ function wire() {
   $("browse-garmin").addEventListener("click", guard(() => browse("garmin")));
   for (const id of ["gm-outcome", "gm-club", "gm-detrend"]) $(id).addEventListener("change", guard(garminRefresh));
   $("gm-predictor").addEventListener("change", guard(garminScatter));
+  for (const id of ["gp-x", "gp-y", "gp-period"]) $(id).addEventListener("change", guard(garminPair));
 
   for (const id of ["sw-session", "sw-baseline"]) $(id).addEventListener("change", guard(swingReview));
   for (const id of ["sw-club", "sw-metric"]) $(id).addEventListener("change", guard(swingProgress));

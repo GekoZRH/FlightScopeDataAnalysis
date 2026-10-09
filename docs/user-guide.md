@@ -21,7 +21,7 @@ At the top are the data folders (full swing, pitching, stack and Garmin), then t
 
 Type the folder with your full swing CSV exports, the folder with your pitching CSV exports, the folder with your stack CSV exports and the folder with your Garmin export, or press **Browse** to pick them in the Windows folder dialog (it can open behind the browser window). Press **Load data** to read them. Below the buttons you see how many files, shots and sessions were found, and the last session.
 
-**You do not need all of them.** Leave a folder empty if you have no data of that kind: that kind is then not used, its tabs are not shown, and nothing else is affected. If the swing, pitching and stack folders are all empty the page says so (Garmin data alone is not enough, it only adds context to your results). Fill a folder in again and press Load data to bring the kind back.
+**You do not need all of them.** Leave a folder empty if you have no data of that kind: that kind is then not used, its tabs are not shown, and nothing else is affected. If all folders are empty the page says so. Garmin data alone is enough: you then get the Garmin tab only. Fill a folder in again and press Load data to bring the kind back.
 
 - For full swing and pitching only the CSV files directly in the folder are read. To keep old exports out of the analysis, move them into a subfolder (for example `legacy data`).
 - For stack data, the CSV files directly in the folder and in the folders one level below it are read, because the training app saves one folder per session. To keep a stack session out, untick it on the Sessions tab.
@@ -83,7 +83,7 @@ The weight is read from the `Club` column of the file (`235g` is 235 grams). Swi
 
 ### Garmin tab
 
-Does your sleep, recovery or training before a session go together with how you hit? The tab needs a Garmin data export (see [Data and settings](data-and-settings.md)) and either swing or stack data.
+Does your sleep, recovery or training before a session go together with how you hit? The tab needs a Garmin data export (see [Data and settings](data-and-settings.md)). The comparison with your results needs swing or stack data as well; with Garmin data alone the tab only shows the panel *Garmin measures against each other* (below).
 
 1. **Choose the result** to explain: *Stack training: speed* (club head speed of the stack swings), *Full swing: club head speed* or *Full swing: carry spread*. For the full swing results you can limit it to one club (default: all selected clubs together).
 2. **Remove the improvement trend** (ticked by default). Your results get better over time, and so does a lot else (you also lift and sleep differently as the months go by). Without this the tab would find links that are only 'both changed over time'. With it ticked, each session is compared with your own trend, so the question is: *on a day when this measure was higher than usual, was the session better than usual?* Untick it to see the raw relation.
@@ -91,6 +91,8 @@ Does your sleep, recovery or training before a session go together with how you 
 4. **The scatter plot** has one dot per session, with the fitted line and the exact numbers in the note under it.
 
 Only what the watch recorded **before the first swing** of the session is used. The night counts only if you woke up within 24 hours before the session.
+
+**Garmin measures against each other.** The panel below the scatter plot shows any two Garmin measures against each other, chosen in two pull-down menus (horizontal and vertical): sleep duration, score, deep, REM and awake time, bedtime, overnight heart rate and heart rate variability, and strength or cardio time (and strength load) in the 24 or 72 hours before you went to bed. It does not need practice results: it uses **every night in your export**, so it has hundreds of dots instead of one per session. Choose the period: all nights, the last 12 months, the last 3 months, or a single calendar year (every year in the export is listed). The colour of a dot is its date (purple old, yellow recent), so you can see when a relation is only a slow change over the months. The note under the plot gives the number of nights, the correlation r and its 95% interval. Nights where one of the two measures is missing (for example heart rate variability before the watch recorded it) are left out.
 
 How much to trust it: with 8 to 16 sessions the intervals are wide, and with 14 measures about one in twenty looks 'clear' by chance. The note above the overview chart tells you how many to expect by chance. Treat a clear result as a hint to test (for example by sleeping on purpose before a session), not as proof. Cardio can only be judged when your export holds cardio sessions in the period you practised; if it does not, the cardio rows have nothing that varies and are left out of the overview chart.
 

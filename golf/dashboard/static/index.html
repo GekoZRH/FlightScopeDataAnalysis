@@ -41,7 +41,7 @@
 
   <div class="card" id="no-data" hidden>
     <h2>No data yet</h2>
-    <p class="muted">Enter the folder with your exported sessions above (full swing, pitching or stack data) and press Load data. You only need the kinds of data you have; leave the other folders empty. Garmin data on its own is not enough: it is compared with your practice results.</p>
+    <p class="muted">Enter the folder with your exported sessions above (full swing, pitching or stack data) and press Load data. You only need the kinds of data you have; leave the other folders empty. Garmin data alone is fine too: the Garmin tab then shows how your Garmin measures relate to each other.</p>
   </div>
 
   <nav class="tabs" role="tablist" id="tabs">
@@ -261,7 +261,7 @@
   </section>
 
   <section id="tab-garmin" hidden>
-    <div class="card">
+    <div class="card" id="gm-results-card">
       <div class="row between">
         <h2>What goes with a good session?</h2>
         <div class="controls">
@@ -275,7 +275,7 @@
       <p class="muted small" id="gm-forest-note"></p>
     </div>
 
-    <div class="card">
+    <div class="card" id="gm-scatter-card">
       <div class="row between">
         <h2>One Garmin measure against the result</h2>
         <div class="controls"><label>Garmin measure <select id="gm-predictor"></select></label></div>
@@ -285,6 +285,20 @@
     </div>
 
     <div class="card">
+      <div class="row between">
+        <h2>Garmin measures against each other</h2>
+        <div class="controls">
+          <label>Horizontal <select id="gp-x"></select></label>
+          <label>Vertical <select id="gp-y"></select></label>
+          <label>Period <select id="gp-period"></select></label>
+        </div>
+      </div>
+      <p class="muted small" style="margin:0 0 6px">One dot per night of your Garmin export, not only practice days, so there are far more points than above. The colour is the date (purple is old, yellow is recent), which shows whether a relation is just a slow change over the months. Training measures count only what ended before you went to bed.</p>
+      <div id="gp-plot" class="plot tall"></div>
+      <p class="muted small" id="gp-note"></p>
+    </div>
+
+    <div class="card" id="gm-howto-card">
       <h2>How to read this</h2>
       <ul class="muted small" style="margin:6px 0 0;padding-left:20px">
         <li>The result of a session is compared with your usual level (for stack training at one weight, for the full swing per club), so sessions with different clubs and weights can be put side by side.</li>

@@ -31,6 +31,7 @@ from golf.stats import (
 )
 from golf.stats.context import PREDICTORS, session_context
 from golf.stats.correlation import correlate
+from golf.stats.daily import DAILY_MEASURES, daily_table
 from golf.stats.outcomes import stack_speed, swing_spread, swing_speed
 
 # What a session is compared with ("historic"):
@@ -631,6 +632,9 @@ def garmin_overview(state: AppState) -> Dict:
         "loaded": True,
         "outcomes": [{"key": key, "title": title, "source": source} for key, (title, source) in OUTCOMES.items() if available[source]],
         "predictors": [{"key": key, "title": title, "group": group} for key, (title, group) in PREDICTORS.items()],
+        "daily": [{"key": key, "title": title, "group": group} for key, (title, group) in DAILY_MEASURES.items()],
+        "days": list(PAIR_DAYS),
+        "years": sorted({d.year for d in state.garmin.sleep["date"]}, reverse=True) if not state.garmin.sleep.empty else [],
         "clubs": list(dict.fromkeys(swing["label"])) if not swing.empty else [],
         "timezone": state.config.timezone,
     })
@@ -698,6 +702,41 @@ def garmin_scatter(state: AppState, outcome: str, predictor: str, club: Optional
     return clean({
         "x_title": PREDICTORS[predictor][0], "y_title": title, "points": points, "fit": fit,
         "sessions": int(len(joined)), "level": state.config.stats.ci_level,
+    })
+
+
+PAIR_DAYS = (90, 365)           # the "last N days" choices of the nightly plot; a calendar year is chosen as "year:2024"
+
+
+def _in_period(table: pd.DataFrame, period: str) -> pd.DataFrame:
+    """The nights of `table` (indexed by date) in a period: "all", "days:N" (counted back from the latest night) or "year:YYYY"."""
+    kind, _, value = period.partition(":")
+    if period == "all":
+        return table
+    if kind == "days" and value.isdigit() and int(value) in PAIR_DAYS:
+        dates = pd.to_datetime(table.index)
+        return table[dates > dates.max() - pd.Timedelta(days=int(value))] if len(table) else table
+    if kind == "year" and value.isdigit():
+        return table[pd.to_datetime(table.index).year == int(value)] if len(table) else table
+    raise ValueError(f"Unknown period: {period}")
+
+
+def garmin_pair(state: AppState, x: str, y: str, period: str = "all") -> Dict:
+    """Two Garmin measures against each other, one dot per night (all nights of the export, not only practice days)."""
+    if state.garmin is None:
+        raise ValueError("No Garmin data is loaded")
+    for key in (x, y):
+        if key not in DAILY_MEASURES:
+            raise ValueError(f"Unknown Garmin measure: {key}")
+    table = _in_period(daily_table(state.garmin, state.config.timezone), period)
+    used = table.dropna(subset=[x, y]) if not table.empty else table
+    points = [{"date": str(day), "x": row[x], "y": row[y]} for day, row in used.iterrows()]
+    c = correlate([p["x"] for p in points], [p["y"] for p in points], level=state.config.stats.ci_level)
+    fit = None if c is None else {"n": c.n, "r": c.r, "low": c.low, "high": c.high, "slope": c.slope, "intercept": c.intercept}
+    return clean({
+        "x_title": DAILY_MEASURES[x][0], "y_title": DAILY_MEASURES[y][0], "points": points, "fit": fit,
+        "nights": int(len(table)), "level": state.config.stats.ci_level,
+        "first": points[0]["date"] if points else "", "last": points[-1]["date"] if points else "",
     })
 
 

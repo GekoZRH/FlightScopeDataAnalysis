@@ -90,6 +90,8 @@ The optional **fit line** is an ordinary least-squares line through all plotted 
 
 **What it cannot tell you.** It is an association, not a cause. There are many measures and only a handful of sessions, so some will look clear by chance; the page shows how many to expect (number of measures times 0.05). Measures are not independent of each other (deep sleep goes with sleep duration), so two clear rows may be one effect. Practice sessions are not randomly scheduled either: you may practise more after a good night because you feel good.
 
+**Garmin measures against each other.** The nightly table (`stats/daily.py`) has one row per night, dated by the day you woke up. Sleep, heart rate variability and overnight heart rate come from that night. Bedtime is the local clock hour of falling asleep, counted on after midnight (1 am is 25). Training measures add up strength or cardio activities that **ended before bedtime**, within 24 or 72 hours. A night without any such activity counts as 0 minutes, not as missing. The correlation and its interval are calculated as above, but with hundreds of nights the interval is narrow, so a 'clear' correlation can still be a weak one: look at r itself (r = 0.2 means the measure explains about 4% of the other's variation). The nights are not independent either (a bad week follows a bad week), so the interval is too optimistic, and no trend is removed here; the colour of the dots shows the date for that reason.
+
 ## Settings that change the numbers
 
 | Setting | Effect |

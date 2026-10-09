@@ -4,7 +4,7 @@
 
 ```
 conda activate golf            # Python 3.13; Python >= 3.11 is needed (tomllib)
-python -m pytest               # about 210 tests, roughly a minute
+python -m pytest               # about 220 tests, roughly a minute
 ```
 
 `requirements.txt` lists the packages. The tests use made-up data in temporary folders and their own copy of the configuration, so they neither need your CSV files nor change your settings. A few extra checks run against your real data and are skipped when it is absent. The web server tests start a server on a free port.
@@ -34,6 +34,7 @@ golf/
     outcomes.py           one result number per session (stack speed, swing speed, carry spread), trend removal
     context.py            what Garmin recorded before each session (sleep, vitals, strength, cardio)
     correlation.py        Pearson r with Fisher z interval
+    daily.py              one row per night of Garmin data (Garmin measures against each other)
   report/
     cards.py              draws a card (matplotlib)
     build.py              chooses the shots, draws and saves the card
@@ -71,6 +72,7 @@ The page talks to the server with JSON. Requests carry the current choices; noth
 | `/api/load` | POST | Set the data folders (`swing_dir`, `pitching_dir`, `stack_dir`, `garmin_dir`) and reload. An empty value turns that kind off; a key that is left out keeps its folder |
 | `/api/garmin/overview` | GET | Outcomes, clubs and predictors for the Garmin tab; says whether data and sessions suffice |
 | `/api/garmin/table`, `/api/garmin/scatter` | GET | Correlation per Garmin measure; the points and fit of one of them (`outcome`, `club`, `detrend` 1 or 0, and `predictor` for the scatter) |
+| `/api/garmin/pair` | GET | Two nightly Garmin measures against each other (`x`, `y`, `period`: `all`, `days:90`, `days:365` or `year:YYYY`) |
 | `/api/stack/overview`, `/api/stack/progress` | GET | The selected stack sessions and weights; club head speed per session, one series per weight |
 | `/api/browse` | POST | Show the folder dialog and return the folder |
 | `/api/sessions` | GET, POST | List sessions with their selection; save the selection |
@@ -103,6 +105,7 @@ The server listens on `127.0.0.1` only. Because any web page you have open could
 | Read a new kind of club name | `data/labels.py`, with a case in `tests/test_labels.py` |
 | Change the look of a card | constants at the top of `report/cards.py`, titles and notes in `golf.toml` |
 | Add a Garmin measure | add it to `PREDICTORS` and to `session_context()` in `stats/context.py`; the Garmin tab picks it up |
+| Add a nightly Garmin measure (for the 'against each other' plot) | add it to `DAILY_MEASURES` and `daily_table()` in `stats/daily.py` |
 | Add a result to explain | add it to `OUTCOMES` in `dashboard/service.py` and write its per-session function in `stats/outcomes.py` |
 | Change a threshold | `[stats]` in `golf.toml`, documented in `StatsSettings` in `config.py` |
 
