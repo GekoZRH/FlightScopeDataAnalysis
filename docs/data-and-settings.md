@@ -47,6 +47,17 @@ What is read (everything else, which is a lot, is ignored):
 - A night appears once even if several files hold it. A session without a recorded night has no sleep values; it is simply left out of the comparisons that need them.
 - The export is large (it can hold years of data and be over 100 MB) but it is only read when you press Load data, and it never leaves your computer. `garmindata/` is ignored by git.
 
+## Withings export
+
+In the Withings Health Mate app or on the Withings website you can request an export of your data (*Data export*). Unzip it into a folder, for example `withingsdata`, and choose that folder in the dashboard. Only two files are read:
+
+| File | What is used |
+|---|---|
+| `weight.csv` | Date and time, weight, fat mass, bone mass, muscle mass and water (hydration), all in kg. A weighing without body composition (a plain scale reading) keeps its weight |
+| `height.csv` | Your height, for the body mass index (the latest height up to the weighing) |
+
+The other files (account, devices, ECG, `other.csv`, which only repeats the same values as whole-number percentages) are not read. When there are several weighings on a day, the first of the day is used. Body fat % is calculated from fat mass and weight, so it has decimals. The times in the file are taken as they are; only the date matters. `withingsdata/` is ignored by git.
+
 ## How club names are read
 
 The `Club` text is split into **club**, **variant** and **intent**.
@@ -88,7 +99,7 @@ The file is in the project folder and is committed to git. Relative paths are re
 
 | Section | Setting | Meaning |
 |---|---|---|
-| `[paths]` | `swing_dir`, `pitching_dir`, `stack_dir`, `garmin_dir` | Data folders used until you choose others in the dashboard. An empty value (`""`) means: no data of that kind |
+| `[paths]` | `swing_dir`, `pitching_dir`, `stack_dir`, `garmin_dir`, `withings_dir` | Data folders used until you choose others in the dashboard. An empty value (`""`) means: no data of that kind |
 | `[garmin]` | `timezone` | Your local time zone, to turn Garmin's UTC times into local times (default `Europe/Zurich`) |
 | | `output_dir` | Where cards are written (default `Output`) |
 | `[stats]` | `window_weeks`, `fallback_weeks` | The two "Last N weeks" quick buttons on the Sessions tab (4 and 12) |

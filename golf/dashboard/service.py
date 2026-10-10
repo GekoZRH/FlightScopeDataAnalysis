@@ -21,6 +21,7 @@ from golf.bag import available_clubs, club_variant, intent_grid, select_bag, unl
 from golf.config import FOLDER_KINDS, MODES, BagSpec, Config, load_config, update_local_settings
 from golf.data import load_shots, unparsed_labels, unreadable_weights
 from golf.data.garmin import GarminData, describe_garmin, find_export_folders, load_garmin
+from golf.data.withings import WithingsData, describe_withings, find_weight_file, load_withings
 from golf.data.stack import stack_files
 from golf.data.labels import FULL_SWING
 from golf.report.build import generate_card
@@ -29,9 +30,10 @@ from golf.stats import (
     COVERAGE_1S, COVERAGE_2S, compare_normal, describe, fit_bivariate, fit_univariate,
     session_summary,
 )
-from golf.stats.context import PREDICTORS, session_context
+from golf.stats.context import ALL_PREDICTORS, available_predictors, session_context
 from golf.stats.correlation import correlate
-from golf.stats.daily import DAILY_MEASURES, daily_table
+from golf.stats.daily import DAILY_MEASURES, available_measures, daily_table, rolling_means, windows_for
+from golf.stats.difference import mean_difference
 from golf.stats.outcomes import stack_speed, swing_spread, swing_speed
 
 # What a session is compared with ("historic"):
@@ -52,6 +54,7 @@ class AppState:
         self.config: Config = load_config(config_path)
         self.shots: Dict[str, Optional[pd.DataFrame]] = {mode: None for mode in MODES}
         self.garmin: Optional[GarminData] = None
+        self.withings: Optional[WithingsData] = None
         self.errors: Dict[str, str] = {}
         self.reload_data()
 
@@ -60,6 +63,7 @@ class AppState:
 
     def reload_data(self, modes=MODES) -> None:
         self.reload_garmin()
+        self.reload_withings()
         for mode in modes:
             if self.config.data_dir(mode) is None:        # no folder chosen: this kind of data is not used
                 self.shots[mode] = None
@@ -84,6 +88,19 @@ class AppState:
         except (FileNotFoundError, ValueError, OSError) as error:
             self.garmin = None
             self.errors["garmin"] = str(error)
+
+    def reload_withings(self) -> None:
+        folder = self.config.withings_dir
+        if folder is None:                                  # no folder chosen: the Withings data is not used
+            self.withings = None
+            self.errors.pop("withings", None)
+            return
+        try:
+            self.withings = load_withings(folder)
+            self.errors.pop("withings", None)
+        except (FileNotFoundError, ValueError, OSError, pd.errors.ParserError) as error:
+            self.withings = None
+            self.errors["withings"] = str(error)
 
     def included(self, mode: str) -> Optional[pd.DataFrame]:
         """All shots of the sessions chosen on the Sessions tab (None if no data is loaded)."""
@@ -157,6 +174,13 @@ def dataset_info(state: AppState) -> Dict:
         info["garmin"] = {"folder": str(garmin_folder), "enabled": True, "loaded": False, "error": state.errors.get("garmin", "")}
     else:
         info["garmin"] = {"folder": str(garmin_folder), "enabled": True, "loaded": True, **describe_garmin(state.garmin)}
+    withings_folder = state.config.withings_dir
+    if withings_folder is None:
+        info["withings"] = {"folder": "", "enabled": False, "loaded": False, "error": ""}
+    elif state.withings is None:
+        info["withings"] = {"folder": str(withings_folder), "enabled": True, "loaded": False, "error": state.errors.get("withings", "")}
+    else:
+        info["withings"] = {"folder": str(withings_folder), "enabled": True, "loaded": True, **describe_withings(state.withings)}
     return clean(info)
 
 
@@ -179,6 +203,8 @@ def set_folders(state: AppState, folders: Dict[str, Optional[str]]) -> Dict:
             raise ValueError(f"{value} is not a folder")
         if mode == "garmin":
             find_export_folders(folder)                       # raises if this is not a Garmin export
+        elif mode == "withings":
+            find_weight_file(folder)                          # raises if this is not a Withings export
         elif not (bool(stack_files(folder)) if mode == "stack" else any(folder.glob("*.csv"))):
             raise ValueError(f"No CSV files found in {value}")
         patch[f"{mode}_dir"] = str(folder)
@@ -613,8 +639,8 @@ OUTCOMES = {
 
 
 def _garmin_ready(state: AppState, outcome: str) -> None:
-    if state.garmin is None:
-        raise ValueError("No Garmin data is loaded")
+    if state.garmin is None and state.withings is None:
+        raise ValueError("No Garmin or Withings data is loaded")
     if outcome not in OUTCOMES:
         raise ValueError(f"Unknown result: {outcome}")
     needed = OUTCOMES[outcome][1]
@@ -624,17 +650,21 @@ def _garmin_ready(state: AppState, outcome: str) -> None:
 
 def garmin_overview(state: AppState) -> Dict:
     """What the correlation tab can offer: the results, the Garmin measures and the clubs."""
-    if state.garmin is None:
-        return {"loaded": False, "outcomes": [], "predictors": [], "clubs": []}
-    available = {kind: state.included(kind) is not None for kind in ("swing", "stack")}
+    measures = available_measures(state.garmin, state.withings)
+    if not measures:
+        return {"loaded": False, "outcomes": [], "predictors": [], "clubs": [], "daily": []}
     swing = state.selected("swing")
+    garmin = state.garmin is not None                       # the sleep comparison needs the watch
+    available = {kind: state.included(kind) is not None for kind in ("swing", "stack")}
+    table = _health_table(state)
     return clean({
         "loaded": True,
         "outcomes": [{"key": key, "title": title, "source": source} for key, (title, source) in OUTCOMES.items() if available[source]],
-        "predictors": [{"key": key, "title": title, "group": group} for key, (title, group) in PREDICTORS.items()],
-        "daily": [{"key": key, "title": title, "group": group} for key, (title, group) in DAILY_MEASURES.items()],
+        "predictors": [{"key": key, "title": title, "group": group} for key, (title, group) in available_predictors(state.garmin, state.withings).items()],
+        "daily": [{"key": key, "title": title, "group": group} for key, (title, group) in measures.items()],
         "days": list(PAIR_DAYS),
-        "years": sorted({d.year for d in state.garmin.sleep["date"]}, reverse=True) if not state.garmin.sleep.empty else [],
+        "years": sorted({d.year for d in table.index}, reverse=True),
+        "training_sleep": garmin,
         "clubs": list(dict.fromkeys(swing["label"])) if not swing.empty else [],
         "timezone": state.config.timezone,
     })
@@ -663,7 +693,7 @@ def _joined(state: AppState, outcome: str, club: Optional[str], detrend: bool):
     results, starts, title = _session_results(state, outcome, club, detrend)
     if results.empty:
         return pd.DataFrame(), title
-    context = session_context(starts.loc[results["date"]], state.garmin, state.config.timezone)
+    context = session_context(starts.loc[results["date"]], state.garmin, state.config.timezone, state.withings)
     joined = results.set_index("date").join(context)
     return joined, title
 
@@ -673,7 +703,7 @@ def garmin_table(state: AppState, outcome: str, club: Optional[str] = None, detr
     joined, title = _joined(state, outcome, club, detrend)
     level = state.config.stats.ci_level
     rows = []
-    for key, (name, group) in PREDICTORS.items():
+    for key, (name, group) in available_predictors(state.garmin, state.withings).items():
         c = correlate(joined[key], joined["value"], level=level) if not joined.empty else None
         valid = int(joined[key].notna().sum()) if not joined.empty else 0
         rows.append({
@@ -690,8 +720,12 @@ def garmin_table(state: AppState, outcome: str, club: Optional[str] = None, detr
 
 def garmin_scatter(state: AppState, outcome: str, predictor: str, club: Optional[str] = None, detrend: bool = True) -> Dict:
     """One Garmin measure against one result, one dot per session."""
-    if predictor not in PREDICTORS:
-        raise ValueError(f"Unknown Garmin measure: {predictor}")
+    if predictor not in ALL_PREDICTORS:
+        raise ValueError(f"Unknown measure: {predictor}")
+    if state.garmin is None and state.withings is None:
+        raise ValueError("No Garmin or Withings data is loaded")
+    if predictor not in available_predictors(state.garmin, state.withings):
+        raise ValueError(f"{ALL_PREDICTORS[predictor][0]} needs data that is not loaded")
     joined, title = _joined(state, outcome, club, detrend)
     points = []
     if not joined.empty:
@@ -700,7 +734,7 @@ def garmin_scatter(state: AppState, outcome: str, predictor: str, club: Optional
     c = correlate([p["x"] for p in points], [p["y"] for p in points], level=state.config.stats.ci_level)
     fit = None if c is None else {"n": c.n, "r": c.r, "low": c.low, "high": c.high, "slope": c.slope, "intercept": c.intercept}
     return clean({
-        "x_title": PREDICTORS[predictor][0], "y_title": title, "points": points, "fit": fit,
+        "x_title": ALL_PREDICTORS[predictor][0], "y_title": title, "points": points, "fit": fit,
         "sessions": int(len(joined)), "level": state.config.stats.ci_level,
     })
 
@@ -721,22 +755,86 @@ def _in_period(table: pd.DataFrame, period: str) -> pd.DataFrame:
     raise ValueError(f"Unknown period: {period}")
 
 
-def garmin_pair(state: AppState, x: str, y: str, period: str = "all") -> Dict:
-    """Two Garmin measures against each other, one dot per night (all nights of the export, not only practice days)."""
-    if state.garmin is None:
-        raise ValueError("No Garmin data is loaded")
-    for key in (x, y):
+def _health_ready(state: AppState, measures) -> None:
+    """Raise if no health data is loaded or one of the measures is unknown or not available from the loaded data."""
+    available = available_measures(state.garmin, state.withings)
+    if not available:
+        raise ValueError("No Garmin or Withings data is loaded")
+    for key in measures:
         if key not in DAILY_MEASURES:
-            raise ValueError(f"Unknown Garmin measure: {key}")
-    table = _in_period(daily_table(state.garmin, state.config.timezone), period)
+            raise ValueError(f"Unknown measure: {key}")
+        if key not in available:
+            raise ValueError(f"{DAILY_MEASURES[key][0]} needs data that is not loaded")
+
+
+def _health_table(state: AppState) -> pd.DataFrame:
+    return daily_table(state.garmin, state.config.timezone, state.withings)
+
+
+def health_trend(state: AppState, measure: str, period: str = "all") -> Dict:
+    """One measure over time with its short and long average (every night or weighing of the exports)."""
+    _health_ready(state, (measure,))
+    table = _in_period(_health_table(state), period)
+    windows, minimum = windows_for(measure)
+    series = table[measure].dropna() if len(table) else pd.Series(dtype=float)
+    means = rolling_means(series, windows, minimum)
+    points = [{"date": str(day), "value": value, "short": means.loc[day, "short"], "long": means.loc[day, "long"]} for day, value in series.items()]
+    latest = {"short": means["short"].iloc[-1], "long": means["long"].iloc[-1], "all": series.mean()} if len(series) else None
+    return clean({"title": DAILY_MEASURES[measure][0], "points": points, "latest": latest, "days": int(len(table)), "windows": list(windows)})
+
+
+def garmin_pair(state: AppState, x: str, y: str, period: str = "all") -> Dict:
+    """Two health measures against each other, one dot per day (every day of the exports, not only practice days)."""
+    _health_ready(state, (x, y))
+    table = _in_period(_health_table(state), period)
     used = table.dropna(subset=[x, y]) if not table.empty else table
     points = [{"date": str(day), "x": row[x], "y": row[y]} for day, row in used.iterrows()]
     c = correlate([p["x"] for p in points], [p["y"] for p in points], level=state.config.stats.ci_level)
     fit = None if c is None else {"n": c.n, "r": c.r, "low": c.low, "high": c.high, "slope": c.slope, "intercept": c.intercept}
     return clean({
         "x_title": DAILY_MEASURES[x][0], "y_title": DAILY_MEASURES[y][0], "points": points, "fit": fit,
-        "nights": int(len(table)), "level": state.config.stats.ci_level,
+        "days": int(len(table)), "level": state.config.stats.ci_level,
         "first": points[0]["date"] if points else "", "last": points[-1]["date"] if points else "",
+    })
+
+
+# How the night after a strength session shortly before bed differs from other nights.
+TRAINING_GROUPS = (
+    ("none", "No strength training in the 12 h before bed"),
+    ("earlier", "Strength training 4 to 12 h before bed"),
+    ("late", "Strength training within 4 h before bed"),
+)
+TRAINING_OUTCOMES = ("sleep_h", "sleep_score", "deep_min", "rem_min", "awake_min", "bedtime_h", "hrv_ms", "night_hr")
+
+
+def health_training_sleep(state: AppState, period: str = "all") -> Dict:
+    """Sleep and recovery on nights after a strength session within 12 h or 4 h before sleep, against nights without."""
+    if state.garmin is None:
+        raise ValueError("No Garmin data is loaded")
+    table = _in_period(_health_table(state), period)
+    nights = table.dropna(subset=["sleep_h"]) if len(table) else table
+    level = state.config.stats.ci_level
+    if nights.empty:
+        masks = {key: pd.Series(dtype=bool) for key, _ in TRAINING_GROUPS}
+    else:
+        within12, within4 = nights["strength_min_12h"] > 0, nights["strength_min_4h"] > 0
+        masks = {"none": ~within12, "earlier": within12 & ~within4, "late": within4}
+    rows = []
+    for key in TRAINING_OUTCOMES:
+        row = {"key": key, "title": DAILY_MEASURES[key][0]}
+        base = nights.loc[masks["none"], key] if len(nights) else pd.Series(dtype=float)
+        row["none"] = {"n": int(base.notna().sum()), "mean": base.mean() if base.notna().any() else None}
+        for group in ("earlier", "late"):
+            values = nights.loc[masks[group], key] if len(nights) else pd.Series(dtype=float)
+            cell = {"n": int(values.notna().sum()), "mean": values.mean() if values.notna().any() else None, "diff": None, "low": None, "high": None}
+            d = mean_difference(values, base, level=level)
+            if d is not None:
+                cell.update(diff=d.diff, low=d.low, high=d.high)
+            row[group] = cell
+        rows.append(row)
+    return clean({
+        "groups": [{"key": key, "title": title, "nights": int(masks[key].sum())} for key, title in TRAINING_GROUPS],
+        "rows": rows, "nights": int(len(nights)), "level": level,
     })
 
 

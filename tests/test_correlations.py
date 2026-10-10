@@ -16,7 +16,7 @@ from test_stack import write_stack
 DAYS = [date(2026, 3, 2) + timedelta(days=4 * k) for k in range(14)]
 
 
-def build_world(tmp_path, *, sleep_hours, speed_for, garmin=True, stack=False, strength_days=()):
+def build_world(tmp_path, *, sleep_hours, speed_for, garmin=True, stack=False, strength_days=(), weighings=None, deep_for=None, training=None):
     """Practice at 10:00 local on DAYS. The night before each session lasts sleep_hours[k]; speed_for(k) is the 7-iron speed."""
     swing = tmp_path / "swing"
     swing.mkdir()
@@ -40,17 +40,32 @@ def build_world(tmp_path, *, sleep_hours, speed_for, garmin=True, stack=False, s
         for k, day in enumerate(DAYS):
             end = datetime(day.year, day.month, day.day, 5, 30)
             start = end - timedelta(hours=sleep_hours[k] + 0.2)
+            deep = deep_for(k) if deep_for else 60
             nights.append(night(day.isoformat(), start.strftime("%Y-%m-%dT%H:%M:%S") + ".0", end.strftime("%Y-%m-%dT%H:%M:%S") + ".0",
-                                deep=60, light=int(sleep_hours[k] * 60 - 140), rem=80, awake=12, score=int(40 + 5 * sleep_hours[k])))
+                                deep=deep, light=int(sleep_hours[k] * 60 - deep - 80), rem=80, awake=12, score=int(40 + 5 * sleep_hours[k])))
             health.append({"calendarDate": day.isoformat(), "metrics": [{"type": "HRV", "value": 40.0 + (k % 5)}, {"type": "HR", "value": 55.0}]})
         (wellness / "2026-01-01_2026-12-31_1_sleepData.json").write_text(json.dumps(nights), encoding="utf-8")
         (wellness / "2026-01-01_2026-12-31_1_healthStatusData.json").write_text(json.dumps(health), encoding="utf-8")
         acts = [activity("strength_training", datetime(d.year, d.month, d.day, 15, 0) - timedelta(days=1), 60, load=15.0) for d in strength_days]
+        # training={night index: hours between the end of a one hour session and falling asleep}
+        for k, hours in (training or {}).items():
+            day = DAYS[k]
+            bed = datetime(day.year, day.month, day.day, 5, 30) - timedelta(hours=sleep_hours[k] + 0.2)
+            acts.append(activity("strength_training", bed - timedelta(hours=hours + 1), 60, load=15.0))
         (fitness / "x_1_summarizedActivities.json").write_text(json.dumps([{"summarizedActivitiesExport": acts}]), encoding="utf-8")
+
+    if weighings:
+        scale = tmp_path / "withingsdata"
+        scale.mkdir()
+        lines = ['Date,"Weight (kg)","Fat mass (kg)","Bone mass (kg)","Muscle mass (kg)","Hydration (kg)",Comments']
+        lines += [f'"{day.isoformat()} 06:30:00",{weight},{fat},3.2,{muscle},44.0,' for day, weight, fat, muscle in weighings]
+        (scale / "weight.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        (scale / "height.csv").write_text('Date,"Height (m)",Comments\n"2020-05-27 13:11:12",1.80,\n', encoding="utf-8")
 
     text = DEFAULT_CONFIG.read_text(encoding="utf-8")
     for key, value in (("swing_dir", "swing"), ("pitching_dir", ""), ("stack_dir", "stack" if stack else ""),
-                       ("garmin_dir", "garmindata" if garmin else ""), ("output_dir", "out")):
+                       ("garmin_dir", "garmindata" if garmin else ""), ("withings_dir", "withingsdata" if weighings else ""),
+                       ("output_dir", "out")):
         text = re.sub(rf'{key} = ".*"', f'{key} = "{value}"', text)
     (tmp_path / "golf.toml").write_text(text, encoding="utf-8")
     return tmp_path / "golf.toml"
@@ -103,8 +118,8 @@ def test_without_stack_data_the_stack_result_is_not_offered(tmp_path):
 def test_without_garmin_data_everything_is_empty_or_refused(tmp_path):
     state = AppState(build_world(tmp_path, sleep_hours=[8.0] * len(DAYS), speed_for=lambda k: 90.0, garmin=False))
     assert call(state, "/api/state")["datasets"]["garmin"] == {"folder": "", "enabled": False, "loaded": False, "error": ""}
-    assert call(state, "/api/garmin/overview") == {"loaded": False, "outcomes": [], "predictors": [], "clubs": []}
-    with pytest.raises(api.ApiError, match="No Garmin data"):
+    assert call(state, "/api/garmin/overview") == {"loaded": False, "outcomes": [], "predictors": [], "clubs": [], "daily": []}
+    with pytest.raises(api.ApiError, match="No Garmin or Withings data"):
         call(state, "/api/garmin/scatter", outcome="swing_speed", predictor="sleep_h")
 
 
@@ -198,7 +213,7 @@ def test_bad_requests_are_refused(sleepy_world):
     state, _ = sleepy_world
     with pytest.raises(api.ApiError, match="Unknown result"):
         call(state, "/api/garmin/table", outcome="putting")
-    with pytest.raises(api.ApiError, match="Unknown Garmin measure"):
+    with pytest.raises(api.ApiError, match="Unknown measure"):
         call(state, "/api/garmin/scatter", outcome="swing_speed", predictor="mood")
 
 

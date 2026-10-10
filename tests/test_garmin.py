@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from golf.data.garmin import CARDIO_TYPES, describe_garmin, find_export_folders, load_garmin
-from golf.stats.context import PREDICTORS, session_context
+from golf.stats.context import ALL_PREDICTORS, PREDICTORS, session_context
 from golf.stats.correlation import correlate
 from golf.stats.outcomes import relative_to_usual, stack_speed, swing_speed, swing_spread
 
@@ -133,7 +133,8 @@ def test_cardio_windows_and_other_activities(export):
 
 def test_time_of_day_and_all_predictors_are_present(export):
     c = context(export, datetime(2026, 6, 10, 19, 30))
-    assert c["session_hour"] == pytest.approx(19.5) and list(c.index) == list(PREDICTORS)
+    assert c["session_hour"] == pytest.approx(19.5) and list(c.index) == list(ALL_PREDICTORS)         # body measures stay empty without scale data
+    assert c[list(PREDICTORS)].notna().any() and c.drop(list(PREDICTORS)).isna().all()
 
 
 def test_daylight_saving_time_is_handled(export):

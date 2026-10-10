@@ -4,7 +4,7 @@
 
 ```
 conda activate golf            # Python 3.13; Python >= 3.11 is needed (tomllib)
-python -m pytest               # about 220 tests, roughly a minute
+python -m pytest               # about 270 tests, roughly a minute
 ```
 
 `requirements.txt` lists the packages. The tests use made-up data in temporary folders and their own copy of the configuration, so they neither need your CSV files nor change your settings. A few extra checks run against your real data and are skipped when it is absent. The web server tests start a server on a free port.
@@ -24,6 +24,7 @@ golf/
     load.py               read the files into one table, one row per shot
     stack.py              stack sessions: the weight is read from the Club column
     garmin.py             Garmin export: nights, overnight vitals, activities
+    withings.py           Withings export: one row per weighing day (weight, body composition, BMI)
   stats/
     univariate.py         normal / skew-normal fit and ranges
     bivariate.py          joint lateral-carry model (Gaussian copula)
@@ -34,7 +35,8 @@ golf/
     outcomes.py           one result number per session (stack speed, swing speed, carry spread), trend removal
     context.py            what Garmin recorded before each session (sleep, vitals, strength, cardio)
     correlation.py        Pearson r with Fisher z interval
-    daily.py              one row per night of Garmin data (Garmin measures against each other)
+    daily.py              one row per day of Garmin and Withings data, rolling means
+    difference.py         Welch interval for the difference of two group means
   report/
     cards.py              draws a card (matplotlib)
     build.py              chooses the shots, draws and saves the card
@@ -69,10 +71,12 @@ The page talks to the server with JSON. Requests carry the current choices; noth
 | URL | Method | Purpose |
 |---|---|---|
 | `/api/state` | GET | Folders, file and shot counts, notes about unselected clubs; `enabled` is false for a kind without a folder |
-| `/api/load` | POST | Set the data folders (`swing_dir`, `pitching_dir`, `stack_dir`, `garmin_dir`) and reload. An empty value turns that kind off; a key that is left out keeps its folder |
-| `/api/garmin/overview` | GET | Outcomes, clubs and predictors for the Garmin tab; says whether data and sessions suffice |
+| `/api/load` | POST | Set the data folders (`swing_dir`, `pitching_dir`, `stack_dir`, `garmin_dir`, `withings_dir`) and reload. An empty value turns that kind off; a key that is left out keeps its folder |
+| `/api/garmin/overview` | GET | Outcomes, clubs and predictors for the Health tab (internally still called `garmin`); says whether data and sessions suffice |
+| `/api/health/trend` | GET | One measure over time with its short and long average (`measure`, `period`) |
+| `/api/health/training-sleep` | GET | Sleep on nights after strength training within 4 or 12 h before bed, against other nights (`period`) |
 | `/api/garmin/table`, `/api/garmin/scatter` | GET | Correlation per Garmin measure; the points and fit of one of them (`outcome`, `club`, `detrend` 1 or 0, and `predictor` for the scatter) |
-| `/api/garmin/pair` | GET | Two nightly Garmin measures against each other (`x`, `y`, `period`: `all`, `days:90`, `days:365` or `year:YYYY`) |
+| `/api/garmin/pair` | GET | Two health measures against each other (`x`, `y`, `period`: `all`, `days:90`, `days:365` or `year:YYYY`) |
 | `/api/stack/overview`, `/api/stack/progress` | GET | The selected stack sessions and weights; club head speed per session, one series per weight |
 | `/api/browse` | POST | Show the folder dialog and return the folder |
 | `/api/sessions` | GET, POST | List sessions with their selection; save the selection |
@@ -104,8 +108,8 @@ The server listens on `127.0.0.1` only. Because any web page you have open could
 | Read another CSV column | add it to `FIELDS` in `data/columns.py` (with its unit) |
 | Read a new kind of club name | `data/labels.py`, with a case in `tests/test_labels.py` |
 | Change the look of a card | constants at the top of `report/cards.py`, titles and notes in `golf.toml` |
-| Add a Garmin measure | add it to `PREDICTORS` and to `session_context()` in `stats/context.py`; the Garmin tab picks it up |
-| Add a nightly Garmin measure (for the 'against each other' plot) | add it to `DAILY_MEASURES` and `daily_table()` in `stats/daily.py` |
+| Relate another watch measure to the practice results | add it to `PREDICTORS` and to `_garmin_row()` in `stats/context.py`; a scale measure goes into `BODY_PREDICTORS` and `_body_row()`; the Health tab picks it up |
+| Add a health measure (trends and the 'against each other' plot) | add it to `GARMIN_MEASURES` or `BODY_MEASURES` and to `daily_table()` in `stats/daily.py` |
 | Add a result to explain | add it to `OUTCOMES` in `dashboard/service.py` and write its per-session function in `stats/outcomes.py` |
 | Change a threshold | `[stats]` in `golf.toml`, documented in `StatsSettings` in `config.py` |
 
@@ -113,7 +117,7 @@ Write a test with the change. The dashboard tests build a small synthetic data s
 
 ## Git
 
-- Personal data never goes into git: `*.csv`, `SwingData/`, `PitchingData/`, `stackdata/`, `garmindata/`, `Plot/`, `Output/` and `golf.local.json` are ignored. If you really need a CSV in the repository (for example a small test file), add it with `git add -f`.
+- Personal data never goes into git: `*.csv`, `SwingData/`, `PitchingData/`, `stackdata/`, `garmindata/`, `withingsdata/`, `Plot/`, `Output/` and `golf.local.json` are ignored. If you really need a CSV in the repository (for example a small test file), add it with `git add -f`.
 - `.gitattributes` keeps text files with the same line endings in the repository whatever the machine.
 - Local branches only so far; nothing has been pushed.
 

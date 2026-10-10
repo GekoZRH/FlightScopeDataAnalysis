@@ -5,6 +5,7 @@ swing_dir = "SwingData/Indoor"
 pitching_dir = "PitchingData/Indoor"
 stack_dir = "stackdata"        # one folder per session below it, or the CSV files directly in it
 garmin_dir = "garmindata"      # the extracted Garmin export folder (or its DI_CONNECT folder inside it)
+withings_dir = "withingsdata"  # the Withings (Health Mate) export folder with weight.csv
 output_dir = "Output"
 
 [stats]

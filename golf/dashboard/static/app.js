@@ -141,6 +141,11 @@ async function renderDatasets(datasets) {
   if (!g.enabled) parts.push("Garmin: no folder chosen");
   else if (!g.loaded) parts.push(`Garmin: not loaded (${g.error || "no data"})`);
   else parts.push(`Garmin: ${g.nights} nights, ${g.strength} strength and ${g.cardio} cardio sessions, up to ${dateLabel(g.last)}`);
+  const w = datasets.withings;
+  $("withings-dir").value = w.folder;
+  if (!w.enabled) parts.push("Withings: no folder chosen");
+  else if (!w.loaded) parts.push(`Withings: not loaded (${w.error || "no data"})`);
+  else parts.push(`Withings: ${w.weighings} weighings, ${dateLabel(w.first)} to ${dateLabel(w.last)}`);
   $("data-status").textContent = parts.join("   |   ");
   $("warnings").innerHTML = warnings.map((w) => `<div class="warning">${w}</div>`).join("");
   applyAvailability(datasets);
@@ -152,11 +157,11 @@ let available = {};
 function applyAvailability(datasets) {
   const loaded = (mode) => Boolean(datasets[mode] && datasets[mode].loaded);
   const any = loaded("swing") || loaded("pitching") || loaded("stack");
-  const anyData = any || loaded("garmin");                                  // Garmin alone has its own tab
+  const anyData = any || loaded("garmin") || loaded("withings");            // health data alone has its own tab
   available = {
     sessions: any, swing: loaded("swing"), bag: loaded("swing"),
     pitching: loaded("pitching"), wedges: loaded("pitching"), stack: loaded("stack"),
-    garmin: loaded("garmin"),
+    garmin: loaded("garmin") || loaded("withings"),
   };
   document.querySelectorAll(".tab").forEach((tab) => (tab.hidden = !available[tab.dataset.tab]));
   $("tabs").hidden = !anyData;
@@ -171,7 +176,7 @@ function firstAvailableTab() {
 async function loadData() {
   const body = {
     swing_dir: $("swing-dir").value.trim(), pitching_dir: $("pitching-dir").value.trim(), stack_dir: $("stack-dir").value.trim(),
-    garmin_dir: $("garmin-dir").value.trim(),
+    garmin_dir: $("garmin-dir").value.trim(), withings_dir: $("withings-dir").value.trim(),
   };
   const data = await api("/api/load", { body });
   await renderDatasets(data.datasets);
@@ -515,10 +520,12 @@ async function loadGarmin() {
   fillMeasureMenu($("gm-predictor"), o.predictors, "sleep_h");
   fillMeasureMenu($("gp-x"), o.daily, "strength_min_24h");
   fillMeasureMenu($("gp-y"), o.daily, "sleep_score");
-  const periods = [["all", "All nights"], ...o.days.map((n) => [`days:${n}`, n === 90 ? "Last 3 months" : n === 365 ? "Last 12 months" : `Last ${n} days`]),
+  const periods = [["all", "All data"], ...o.days.map((n) => [`days:${n}`, n === 90 ? "Last 3 months" : n === 365 ? "Last 12 months" : `Last ${n} days`]),
     ...o.years.map((y) => [`year:${y}`, String(y)])];
-  fillSelect($("gp-period"), periods.map((p) => p[0]), periods.map((p) => p[1]));
-  await Promise.all([compared ? garminRefresh() : null, garminPair()]);
+  $("ts-card").hidden = !o.training_sleep;
+  for (const id of ["gp-period", "ht-period", "ts-period"]) fillSelect($(id), periods.map((p) => p[0]), periods.map((p) => p[1]));
+  fillMeasureMenu($("ht-measure"), o.daily, "hrv_ms");
+  await Promise.all([compared ? garminRefresh() : null, garminPair(), healthTrend(), o.training_sleep ? trainingSleep() : null]);
 }
 
 async function garminRefresh() {
@@ -561,7 +568,7 @@ async function garminForest() {
   }
   const chance = (1 - d.level) * d.tested;
   $("gm-forest-note").textContent = `${d.title}. ${d.sessions} sessions. ${d.clear} of ${d.tested} measures have a bar that does not cross zero; `
-    + `with this many measures about ${chance.toFixed(1)} would do so by chance alone. Measures without a dot have fewer than 5 sessions with a value.`;
+    + `with this many measures about ${chance.toFixed(1)} would do so by chance alone. Measures without a dot have fewer than 5 sessions with a value (body measures need a weighing in the 14 days before the session).`;
 }
 
 async function garminScatter() {
@@ -586,6 +593,49 @@ async function garminScatter() {
     : `${d.points.length} of ${d.sessions} sessions have this measure: too few, or no variation, for a correlation.`;
 }
 
+async function healthTrend() {
+  if (!$("ht-measure").value) return;
+  const d = await api("/api/health/trend", { params: { measure: $("ht-measure").value, period: $("ht-period").value } });
+  const dates = d.points.map((p) => p.date);
+  const accent = css("--accent");
+  const [short, long] = d.windows;
+  $("ht-help").textContent = `Every day of your Garmin and Withings exports. The dots are single values (one night, one weighing), the thin line is the average of the last ${short} days and the bold line `
+    + `the average of the last ${long} days, so the bold line shows where you are heading. An average is only drawn where its window holds enough values.`;
+  const traces = [
+    { x: dates, y: d.points.map((p) => p.value), mode: "markers", marker: { size: 5, color: rgba("#378ADD", 0.35) }, name: "single values",
+      customdata: dates.map(dateLabel), hovertemplate: "%{customdata}: %{y:.1f}<extra></extra>" },
+    { x: dates, y: d.points.map((p) => p.short), mode: "lines", line: { color: rgba("#378ADD", 0.8), width: 1.5 }, name: `${short}-day average`, connectgaps: false,
+      hovertemplate: `${short}-day average %{y:.1f}<extra></extra>` },
+    { x: dates, y: d.points.map((p) => p.long), mode: "lines", line: { color: accent, width: 3.5 }, name: `${long}-day average`, connectgaps: false,
+      hovertemplate: `${long}-day average %{y:.1f}<extra></extra>` },
+  ];
+  draw("ht-plot", traces, baseLayout({ xaxis: { type: "date", showgrid: true }, yaxis: { title: { text: d.title }, showgrid: true }, legend: { orientation: "h", y: 1.12 } }));
+  const n = (v) => (v == null ? "–" : v.toFixed(1));
+  $("ht-note").textContent = d.latest
+    ? `${d.points.length} of ${d.days} days have a value. Latest: ${short}-day average ${n(d.latest.short)}, ${long}-day average ${n(d.latest.long)}; whole period ${n(d.latest.all)}.`
+    : "No values for this measure in this period.";
+}
+
+async function trainingSleep() {
+  const d = await api("/api/health/training-sleep", { params: { period: $("ts-period").value } });
+  const cell = (c) => `${num(c.mean, 1)} <span class="pm">n=${c.n}</span>`;
+  const change = (c) => {
+    if (c.diff == null) return "–";
+    const text = `${signed(c.diff, 1)} <span class="pm">(${signed(c.low, 1)} to ${signed(c.high, 1)})</span>`;
+    return c.low > 0 || c.high < 0 ? `<b>${text}</b>` : text;
+  };
+  const rows = d.rows.map((r) => `<tr><td>${r.title}</td><td>${cell(r.none)}</td><td>${cell(r.earlier)}</td><td>${change(r.earlier)}</td><td>${cell(r.late)}</td><td>${change(r.late)}</td></tr>`).join("");
+  $("ts-table").innerHTML = `<tr><th rowspan="2">Measure</th><th>No training in 12 h</th><th colspan="2">Training 4 to 12 h before bed</th><th colspan="2">Training within 4 h before bed</th></tr>`
+    + `<tr><th>average</th><th>average</th><th>difference</th><th>average</th><th>difference</th></tr>` + rows;
+  const pct = Math.round(d.level * 100);
+  const cells = d.rows.flatMap((r) => [r.earlier, r.late]).filter((c) => c.diff != null);
+  const clear = cells.filter((c) => c.low > 0 || c.high < 0).length;
+  $("ts-note").textContent = d.nights
+    ? `${d.nights} nights: ${d.groups[0].nights} without training, ${d.groups[1].nights} with training 4 to 12 h before bed, ${d.groups[2].nights} within 4 h. ${pct}% intervals. `
+      + `${clear} of ${cells.length} differences are clear; about ${((1 - d.level) * cells.length).toFixed(1)} would be by chance alone. This is an association: days with an evening workout also differ in other ways.`
+    : "No nights in this period.";
+}
+
 async function garminPair() {
   if (!$("gp-x").value || !$("gp-y").value) return;
   const d = await api("/api/garmin/pair", { params: { x: $("gp-x").value, y: $("gp-y").value, period: $("gp-period").value } });
@@ -608,9 +658,9 @@ async function garminPair() {
   const pct = Math.round(d.level * 100);
   $("gp-note").textContent = $("gp-x").value === $("gp-y").value ? "Choose two different measures."
     : d.fit
-    ? `${d.fit.n} of ${d.nights} nights (${dateLabel(d.first)} to ${dateLabel(d.last)}). Correlation r = ${d.fit.r.toFixed(2)}, ${pct}% interval ${d.fit.low.toFixed(2)} to ${d.fit.high.toFixed(2)}. `
+    ? `${d.fit.n} of ${d.days} days (${dateLabel(d.first)} to ${dateLabel(d.last)}). Correlation r = ${d.fit.r.toFixed(2)}, ${pct}% interval ${d.fit.low.toFixed(2)} to ${d.fit.high.toFixed(2)}. `
       + "A correlation shows that two measures go together, not that one causes the other."
-    : `${d.points.length} of ${d.nights} nights have both measures: too few, or no variation, for a correlation.`;
+    : `${d.points.length} of ${d.days} days have both measures: too few, or no variation, for a correlation.`;
 }
 
 // ---------------------------------------------------------------- bag and wedge selection
@@ -711,8 +761,11 @@ function wire() {
   $("browse-pitching").addEventListener("click", guard(() => browse("pitching")));
   $("browse-stack").addEventListener("click", guard(() => browse("stack")));
   $("browse-garmin").addEventListener("click", guard(() => browse("garmin")));
+  $("browse-withings").addEventListener("click", guard(() => browse("withings")));
   for (const id of ["gm-outcome", "gm-club", "gm-detrend"]) $(id).addEventListener("change", guard(garminRefresh));
   $("gm-predictor").addEventListener("change", guard(garminScatter));
+  for (const id of ["ht-measure", "ht-period"]) $(id).addEventListener("change", guard(healthTrend));
+  $("ts-period").addEventListener("change", guard(trainingSleep));
   for (const id of ["gp-x", "gp-y", "gp-period"]) $(id).addEventListener("change", guard(garminPair));
 
   for (const id of ["sw-session", "sw-baseline"]) $(id).addEventListener("change", guard(swingReview));

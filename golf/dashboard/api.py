@@ -57,6 +57,8 @@ GET: Dict[str, Callable] = {
     "/api/garmin/table": lambda s, q, b: service.garmin_table(s, _first(q, "outcome"), q.get("club") or None, q.get("detrend", "1") == "1"),
     "/api/garmin/scatter": lambda s, q, b: service.garmin_scatter(
         s, _first(q, "outcome"), _first(q, "predictor"), q.get("club") or None, q.get("detrend", "1") == "1"),
+    "/api/health/trend": lambda s, q, b: service.health_trend(s, _first(q, "measure"), q.get("period", "all")),
+    "/api/health/training-sleep": lambda s, q, b: service.health_training_sleep(s, q.get("period", "all")),
     "/api/garmin/pair": lambda s, q, b: service.garmin_pair(s, _first(q, "x"), _first(q, "y"), q.get("period", "all")),
     "/api/sessions": lambda s, q, b: service.get_sessions(s, _first(q, "mode")),
     "/api/bag": lambda s, q, b: service.get_bag(s),

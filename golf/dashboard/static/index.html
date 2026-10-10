@@ -31,6 +31,11 @@
       <input type="text" id="garmin-dir" spellcheck="false" placeholder="no Garmin data (the extracted Garmin export)">
       <button id="browse-garmin" type="button">Browse</button>
     </div>
+    <div class="folder-row">
+      <label for="withings-dir">Withings data</label>
+      <input type="text" id="withings-dir" spellcheck="false" placeholder="no Withings data (the Health Mate export folder with weight.csv)">
+      <button id="browse-withings" type="button">Browse</button>
+    </div>
     <div class="row between">
       <div class="muted" id="data-status">Loading…</div>
       <button id="load" type="button">Load data</button>
@@ -41,7 +46,7 @@
 
   <div class="card" id="no-data" hidden>
     <h2>No data yet</h2>
-    <p class="muted">Enter the folder with your exported sessions above (full swing, pitching or stack data) and press Load data. You only need the kinds of data you have; leave the other folders empty. Garmin data alone is fine too: the Garmin tab then shows how your Garmin measures relate to each other.</p>
+    <p class="muted">Enter the folder with your exported sessions above (full swing, pitching or stack data) and press Load data. You only need the kinds of data you have; leave the other folders empty. Garmin or Withings data alone is fine too: the Health tab then shows your trends and how your health measures relate to each other.</p>
   </div>
 
   <nav class="tabs" role="tablist" id="tabs">
@@ -49,7 +54,7 @@
     <button class="tab on" data-tab="swing" role="tab">Full swing</button>
     <button class="tab" data-tab="pitching" role="tab">Pitching</button>
     <button class="tab" data-tab="stack" role="tab">Stack</button>
-    <button class="tab" data-tab="garmin" role="tab">Garmin</button>
+    <button class="tab" data-tab="garmin" role="tab">Health</button>
     <span class="grow"></span>
     <button class="tab" data-tab="bag" role="tab">Bag</button>
     <button class="tab" data-tab="wedges" role="tab">Wedge intents</button>
@@ -261,6 +266,29 @@
   </section>
 
   <section id="tab-garmin" hidden>
+    <div class="card">
+      <div class="row between">
+        <h2>Trends</h2>
+        <div class="controls">
+          <label>Measure <select id="ht-measure"></select></label>
+          <label>Period <select id="ht-period"></select></label>
+        </div>
+      </div>
+      <p class="muted small" style="margin:0 0 6px" id="ht-help"></p>
+      <div id="ht-plot" class="plot tall"></div>
+      <p class="muted small" id="ht-note"></p>
+    </div>
+
+    <div class="card" id="ts-card">
+      <div class="row between">
+        <h2>Strength training before bed and sleep</h2>
+        <div class="controls"><label>Period <select id="ts-period"></select></label></div>
+      </div>
+      <p class="muted small" style="margin:0 0 6px">Nights are sorted by when your last strength session ended before you fell asleep: not in the last 12 hours, 4 to 12 hours before, or within 4 hours before. Each cell is the average with the number of nights; the difference is against nights without training, with its interval. <b>Bold</b> means the interval does not include zero.</p>
+      <div class="table-wrap"><table id="ts-table"></table></div>
+      <p class="muted small" id="ts-note"></p>
+    </div>
+
     <div class="card" id="gm-results-card">
       <div class="row between">
         <h2>What goes with a good session?</h2>
@@ -270,15 +298,15 @@
           <label><input type="checkbox" id="gm-detrend" checked> Remove my improvement trend</label>
         </div>
       </div>
-      <p class="muted small" style="margin:0 0 6px">Each Garmin measure against the result of your practice sessions. A dot is a correlation with the bar showing how uncertain it is: a bar that crosses zero means the data cannot tell a link from chance. Click a row to see its sessions below.</p>
+      <p class="muted small" style="margin:0 0 6px">Each health measure (watch and scale) against the result of your practice sessions. A dot is a correlation with the bar showing how uncertain it is: a bar that crosses zero means the data cannot tell a link from chance. Click a row to see its sessions below.</p>
       <div id="gm-forest" class="plot tall"></div>
       <p class="muted small" id="gm-forest-note"></p>
     </div>
 
     <div class="card" id="gm-scatter-card">
       <div class="row between">
-        <h2>One Garmin measure against the result</h2>
-        <div class="controls"><label>Garmin measure <select id="gm-predictor"></select></label></div>
+        <h2>One health measure against the result</h2>
+        <div class="controls"><label>Health measure <select id="gm-predictor"></select></label></div>
       </div>
       <div id="gm-plot" class="plot tall"></div>
       <p class="muted small" id="gm-note"></p>
@@ -286,14 +314,14 @@
 
     <div class="card">
       <div class="row between">
-        <h2>Garmin measures against each other</h2>
+        <h2>Health measures against each other</h2>
         <div class="controls">
           <label>Horizontal <select id="gp-x"></select></label>
           <label>Vertical <select id="gp-y"></select></label>
           <label>Period <select id="gp-period"></select></label>
         </div>
       </div>
-      <p class="muted small" style="margin:0 0 6px">One dot per night of your Garmin export, not only practice days, so there are far more points than above. The colour is the date (purple is old, yellow is recent), which shows whether a relation is just a slow change over the months. Training measures count only what ended before you went to bed.</p>
+      <p class="muted small" style="margin:0 0 6px">One dot per day of your Garmin and Withings exports, not only practice days, so there are far more points than above. The colour is the date (purple is old, yellow is recent), which shows whether a relation is just a slow change over the months. Training measures count only what ended before you went to bed.</p>
       <div id="gp-plot" class="plot tall"></div>
       <p class="muted small" id="gp-note"></p>
     </div>
