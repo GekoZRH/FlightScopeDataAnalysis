@@ -131,6 +131,17 @@ def read_certificate(path: Path) -> Certificate:
     return parse_certificate_text(read_pdf_text(Path(path)))
 
 
+def round_key(row) -> str:
+    """A text that names one round of the record (for choosing which rounds take part)."""
+    return f"{row['date']}|{row['club']}|{row['par']}/{row['slope']}/{row['course_rating']}|{row['same_day']}"
+
+
+def with_round_keys(record: pd.DataFrame) -> pd.DataFrame:
+    keyed = record.copy()
+    keyed["round_key"] = [round_key(row) for _, row in record.iterrows()]
+    return keyed
+
+
 def load_record(folder: Path) -> pd.DataFrame:
     """The record of all rounds seen so far (empty if there is none yet)."""
     path = Path(folder) / RECORD_NAME

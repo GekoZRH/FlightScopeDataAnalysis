@@ -4,7 +4,7 @@
 
 ```
 conda activate golf            # Python 3.13; Python >= 3.11 is needed (tomllib)
-python -m pytest               # about 350 tests, roughly a minute
+python -m pytest               # about 360 tests, roughly a minute
 ```
 
 `requirements.txt` lists the packages. The tests use made-up data in temporary folders and their own copy of the configuration, so they neither need your CSV files nor change your settings. A few extra checks run against your real data and are skipped when it is absent. The web server tests start a server on a free port.
@@ -79,8 +79,9 @@ The page talks to the server with JSON. Requests carry the current choices; noth
 | `/api/garmin/overview` | GET | Outcomes, clubs and predictors for the Health tab (internally still called `garmin`); says whether data and sessions suffice |
 | `/api/rounds/overview` | GET | Both kinds of round with their measures and years |
 | `/api/rounds/trend` | GET | One measure round by round with its averages (`source` competition or garmin, `measure`, `period`) |
-| `/api/rounds/competition` | GET | The competition record, newest first, with the Garmin statistics of the same day (`period`) |
-| `/api/rounds/garmin-summary`, `/api/rounds/garmin-rounds` | GET | The statistics of the Garmin rounds (all, last 12 months, last 10 rounds); the latest rounds |
+| `/api/rounds/competition` | GET | The competition record, newest first, with whether each round takes part and the Garmin statistics of the same day |
+| `/api/rounds/garmin-summary`, `/api/rounds/garmin-rounds` | GET | The statistics of the selected Garmin rounds (all, last 12 months, last 10 rounds); every Garmin round with whether it takes part |
+| `/api/rounds/select` | POST | Choose the rounds of a source that take part (`source`, `selected` keys) |
 | `/api/health/trend` | GET | One measure over time with its short and long average (`measure`, `period`) |
 | `/api/health/training-sleep` | GET | Sleep on nights after strength training within 4 or 12 h before bed, against other nights (`period`) |
 | `/api/garmin/table`, `/api/garmin/scatter` | GET | Correlation per Garmin measure; the points and fit of one of them (`outcome`, `club`, `detrend` 1 or 0, and `predictor` for the scatter) |

@@ -280,9 +280,17 @@
           <label>Period <select id="rc-period"></select></label>
         </div>
       </div>
-      <p class="muted small" style="margin:0 0 6px">Every round on your handicap certificate, kept on record even after it drops off the certificate (see the data folder note in the guide). The thin line is the average of the last 5 rounds, the bold line the average of the last 10. An open circle is a number that was calculated, not read from the certificate.</p>
+      <p class="muted small" style="margin:0 0 6px">Every round on your handicap certificate, kept on record even after it drops off the certificate (see the data folder note in the guide). The line is the average of the last 5 rounds (there are too few rounds for a longer average). An open circle is a number that was calculated, not read from the certificate. Tick the rounds that should take part in the chart in the table below; unticked rounds stay on record.</p>
       <div id="rc-plot" class="plot tall"></div>
       <p class="muted small" id="rc-note"></p>
+
+      <div class="row" style="gap:8px;margin:8px 0 4px;flex-wrap:wrap">
+        <span class="muted small">Rounds that take part:</span>
+        <button type="button" id="rc-all">All</button>
+        <button type="button" id="rc-year">Last 12 months</button>
+        <button type="button" id="rc-last">Last 10 rounds</button>
+        <span class="muted small" id="rc-count"></span>
+      </div>
       <div class="table-wrap"><table id="rc-table"></table></div>
       <p class="muted small" id="rc-table-note"></p>
     </div>
@@ -295,7 +303,7 @@
           <label>Period <select id="rg-period"></select></label>
         </div>
       </div>
-      <p class="muted small" style="margin:0 0 6px">Only full rounds of 18 holes. The thin line is the average of the last 5 rounds that have the measure, the bold line the average of the last 10. A round is left out of a statistic when too few of its holes have the data (for example putts).</p>
+      <p class="muted small" style="margin:0 0 6px">Only full rounds of 18 holes. The thin line is the average of the last 5 rounds that have the measure, the bold line the average of the last 10. A round is left out of a statistic when too few of its holes have the data (for example putts). Tick the rounds that should take part in the list below; the chart, the statistics and the Health tab use only those.</p>
       <div id="rg-plot" class="plot tall"></div>
       <p class="muted small" id="rg-note"></p>
     </div>
@@ -307,8 +315,15 @@
     </div>
 
     <div class="card" id="rl-card">
-      <h2>Latest Garmin rounds</h2>
-      <div class="table-wrap"><table id="rl-table"></table></div>
+      <h2>Garmin rounds</h2>
+      <div class="row" style="gap:8px;margin:8px 0 4px;flex-wrap:wrap">
+        <span class="muted small">Rounds that take part:</span>
+        <button type="button" id="rg-all">All</button>
+        <button type="button" id="rg-year">Last 12 months</button>
+        <button type="button" id="rg-last">Last 10 rounds</button>
+        <span class="muted small" id="rg-count"></span>
+      </div>
+      <div class="table-wrap" style="max-height:480px;overflow-y:auto"><table id="rl-table"></table></div>
       <p class="muted small" id="rl-note"></p>
     </div>
 

@@ -545,60 +545,126 @@ function roundChart(id, d) {
       customdata: solid.map((p) => dateLabel(p.date)), hovertemplate: "%{customdata}: %{y:.1f}<extra></extra>" },
     { x: open.map((p) => p.date), y: open.map((p) => p.value), mode: "markers", name: "calculated", marker: { size: 8, symbol: "circle-open", color: "#378ADD", line: { width: 2 } },
       customdata: open.map((p) => dateLabel(p.date)), hovertemplate: "%{customdata}: %{y:.1f} (calculated)<extra></extra>", visible: open.length ? true : "legendonly", showlegend: open.length > 0 },
-    { x: dates, y: d.points.map((p) => p.short), mode: "lines", line: { color: rgba("#378ADD", 0.8), width: 1.5 }, name: `last ${short} rounds`, connectgaps: false,
+    { x: dates, y: d.points.map((p) => p.short), mode: "lines", line: { color: long ? rgba("#378ADD", 0.8) : css("--accent"), width: long ? 1.5 : 3 }, name: `last ${short} rounds`, connectgaps: false,
       hovertemplate: `last ${short} rounds: %{y:.1f}<extra></extra>` },
-    { x: dates, y: d.points.map((p) => p.long), mode: "lines", line: { color: css("--accent"), width: 3.5 }, name: `last ${long} rounds`, connectgaps: false,
-      hovertemplate: `last ${long} rounds: %{y:.1f}<extra></extra>` },
   ];
+  if (long) {
+    traces.push({ x: dates, y: d.points.map((p) => p.long), mode: "lines", line: { color: css("--accent"), width: 3.5 }, name: `last ${long} rounds`, connectgaps: false,
+      hovertemplate: `last ${long} rounds: %{y:.1f}<extra></extra>` });
+  }
   draw(id, traces, baseLayout({ xaxis: { type: "date", showgrid: true }, yaxis: { title: { text: d.title }, showgrid: true }, legend: { orientation: "h", y: 1.12 } }));
 }
 
 function roundNote(d) {
   const n = (v) => (v == null ? "–" : v.toFixed(1));
+  const [short, long] = d.windows;
   return d.latest
-    ? `${d.points.length} of ${d.rounds} rounds have a value. Latest: average of the last ${d.windows[0]} rounds ${n(d.latest.short)}, of the last ${d.windows[1]} rounds ${n(d.latest.long)}; whole period ${n(d.latest.all)}.`
+    ? `${d.points.length} of ${d.rounds} rounds have a value. Latest: average of the last ${short} rounds ${n(d.latest.short)}`
+      + (long ? `, of the last ${long} rounds ${n(d.latest.long)}` : "") + `; whole period ${n(d.latest.all)}.`
     : "No rounds with this measure in this period.";
 }
+
+// Which rounds take part: a tick per round, like the sessions. Rows are newest first.
+const roundRows = { competition: [], garmin: [] };
+const roundTimer = {};
+const roundIds = { competition: "rc", garmin: "rg" };
+
+function renderRoundCount(source) {
+  const rows = roundRows[source];
+  $(`${roundIds[source]}-count`).textContent = `${rows.filter((r) => r.selected).length} of ${rows.length} rounds selected`;
+}
+
+function selectRounds(source, predicate) {
+  roundRows[source].forEach((r, i) => (r.selected = predicate(r, i)));
+  source === "competition" ? renderCompetitionTable() : renderGarminList();
+  saveRounds(source);
+}
+
+function saveRounds(source) {
+  clearTimeout(roundTimer[source]);
+  roundTimer[source] = setTimeout(guard(async () => {
+    const selected = roundRows[source].filter((r) => r.selected).map((r) => r.key);
+    if (!selected.length) { showError("Select at least one round."); return; }
+    await api("/api/rounds/select", { body: { source, selected } });
+    await (source === "competition" ? competitionRounds() : Promise.all([garminRounds(), garminRoundStats()]));
+  }), 300);
+}
+
+function wireRoundSelection(source, tableId) {
+  const id = roundIds[source];
+  $(`${id}-all`).addEventListener("click", () => selectRounds(source, () => true));
+  $(`${id}-year`).addEventListener("click", () => {
+    const newest = roundRows[source].length ? new Date(roundRows[source][0].date + "T12:00:00") : new Date();
+    selectRounds(source, (r) => (newest - new Date(r.date + "T12:00:00")) / 86400000 < 365);
+  });
+  $(`${id}-last`).addEventListener("click", () => selectRounds(source, (r, i) => i < 10));
+  $(tableId).addEventListener("change", (event) => {
+    const box = event.target.closest("input[type=checkbox]");
+    if (!box) return;
+    const row = roundRows[source].find((r) => r.key === box.dataset.key);
+    if (row) { row.selected = box.checked; renderRoundCount(source); saveRounds(source); }
+  });
+}
+
+const tick = (source, r) => `<td><input type="checkbox" data-key="${r.key.replace(/"/g, "&quot;")}"${r.selected ? " checked" : ""}></td>`;
+const dim = (r, html) => (r.selected ? html : `<span style="opacity:.45">${html}</span>`);
+
+function renderCompetitionTable() {
+  const rows = roundRows.competition, withGarmin = roundGarminLinked;
+  const g = (row, key, digits) => (row.garmin && row.garmin[key] != null ? num(row.garmin[key], digits) : "–");
+  const body = rows.map((r) => `<tr>${tick("competition", r)}<td>${dim(r, dateLabel(r.date))}</td><td style="text-align:left">${dim(r, r.club)}</td><td>${dim(r, `${r.par}/${r.slope}/${num(r.rating)}`)}</td>`
+    + `<td>${dim(r, r.gross_derived ? `<i title="calculated from the differential">${num(r.gross, 0)}*</i>` : num(r.gross, 0))}</td><td>${dim(r, num(r.stableford, 0))}</td><td>${dim(r, num(r.differential))}</td><td>${dim(r, num(r.hcp_new))}</td>`
+    + (withGarmin ? `<td>${dim(r, g(r, "fir_pct", 0))}</td><td>${dim(r, g(r, "gir_pct", 0))}</td><td>${dim(r, g(r, "putts_per_hole", 2))}</td><td>${dim(r, g(r, "penalty_strokes", 0))}</td>` : "") + "</tr>");
+  $("rc-table").innerHTML = "<tr><th></th><th>Date</th><th style='text-align:left'>Club</th><th>Par / slope / rating</th><th>Strokes</th><th>Stableford</th><th>Differential</th><th>Handicap after</th>"
+    + (withGarmin ? "<th>Fairways hit %</th><th>GIR %</th><th>Putts per hole</th><th>Penalties</th>" : "") + "</tr>"
+    + (body.join("") || '<tr><td colspan="12" class="muted">No rounds.</td></tr>');
+  renderRoundCount("competition");
+}
+
+let roundGarminLinked = false;
 
 async function competitionRounds() {
   const period = $("rc-period").value;
   const [d, t] = await Promise.all([
     api("/api/rounds/trend", { params: { source: "competition", measure: $("rc-measure").value, period } }),
-    api("/api/rounds/competition", { params: { period } }),
+    api("/api/rounds/competition"),
   ]);
   roundChart("rc-plot", d);
   $("rc-note").textContent = roundNote(d);
-  const g = (row, key, digits) => (row.garmin && row.garmin[key] != null ? num(row.garmin[key], digits) : "–");
-  const withGarmin = t.garmin_loaded;
-  const rows = t.rows.map((r) => `<tr><td>${dateLabel(r.date)}</td><td style="text-align:left">${r.club}</td><td>${r.par}/${r.slope}/${num(r.rating)}</td>`
-    + `<td>${r.gross_derived ? `<i title="calculated from the differential">${num(r.gross, 0)}*</i>` : num(r.gross, 0)}</td><td>${num(r.stableford, 0)}</td><td>${num(r.differential)}</td><td>${num(r.hcp_new)}</td>`
-    + (withGarmin ? `<td>${g(r, "fir_pct", 0)}</td><td>${g(r, "gir_pct", 0)}</td><td>${g(r, "putts_per_hole", 2)}</td><td>${g(r, "penalty_strokes", 0)}</td>` : "") + "</tr>");
-  $("rc-table").innerHTML = "<tr><th>Date</th><th>Club</th><th>Par / slope / rating</th><th>Strokes</th><th>Stableford</th><th>Differential</th><th>Handicap after</th>"
-    + (withGarmin ? "<th>Fairways hit %</th><th>GIR %</th><th>Putts per hole</th><th>Penalties</th>" : "") + "</tr>"
-    + (rows.join("") || '<tr><td colspan="11" class="muted">No rounds in this period.</td></tr>');
+  roundRows.competition = t.rows;
+  roundGarminLinked = t.garmin_loaded;
+  renderCompetitionTable();
   const derived = t.rows.filter((r) => r.gross_derived).length;
   $("rc-table-note").textContent = (derived ? `* strokes calculated from the differential, the course rating, the slope and the PCC, because the certificate does not list them (${derived}). ` : "")
-    + (withGarmin ? `The last four columns are the statistics of a Garmin round on the same day: ${t.linked} of ${t.rows.length} competition rounds have one.` : "");
+    + (t.garmin_loaded ? `The last four columns are the statistics of a Garmin round on the same day: ${t.linked} of ${t.rows.length} competition rounds have one.` : "");
+}
+
+function renderGarminList() {
+  const body = roundRows.garmin.map((r) => `<tr>${tick("garmin", r)}<td>${dim(r, dateLabel(r.date))}</td><td style="text-align:left">${dim(r, r.course)}</td><td>${dim(r, r.tee)}</td>`
+    + `<td>${dim(r, num(r.strokes, 0))}</td><td>${dim(r, num(r.to_par, 0))}</td><td>${dim(r, num(r.differential))}</td>`
+    + `<td>${dim(r, num(r.fir_pct, 0))}</td><td>${dim(r, num(r.gir_pct, 0))}</td><td>${dim(r, num(r.putts_per_hole, 2))}</td><td>${dim(r, num(r.penalty_strokes, 0))}</td></tr>`).join("");
+  $("rl-table").innerHTML = "<tr><th></th><th>Date</th><th style='text-align:left'>Course</th><th>Tee</th><th>Strokes</th><th>To par</th><th>Differential</th><th>Fairways hit %</th><th>GIR %</th><th>Putts per hole</th><th>Penalties</th></tr>"
+    + (body || '<tr><td colspan="11" class="muted">No rounds.</td></tr>');
+  $("rl-note").textContent = "A dash means the round has too little data for that statistic.";
+  renderRoundCount("garmin");
 }
 
 async function garminRounds() {
-  const d = await api("/api/rounds/trend", { params: { source: "garmin", measure: $("rg-measure").value, period: $("rg-period").value } });
+  const [d, t] = await Promise.all([
+    api("/api/rounds/trend", { params: { source: "garmin", measure: $("rg-measure").value, period: $("rg-period").value } }),
+    api("/api/rounds/garmin-rounds"),
+  ]);
   roundChart("rg-plot", d);
   $("rg-note").textContent = roundNote(d);
-  const t = await api("/api/rounds/garmin-rounds", { params: { period: $("rg-period").value } });
-  const rows = t.rows.map((r) => `<tr><td>${dateLabel(r.date)}</td><td style="text-align:left">${r.course}</td><td>${r.tee}</td><td>${num(r.strokes, 0)}</td><td>${num(r.to_par, 0)}</td><td>${num(r.differential)}</td>`
-    + `<td>${num(r.fir_pct, 0)}</td><td>${num(r.gir_pct, 0)}</td><td>${num(r.putts_per_hole, 2)}</td><td>${num(r.penalty_strokes, 0)}</td></tr>`).join("");
-  $("rl-table").innerHTML = "<tr><th>Date</th><th>Course</th><th>Tee</th><th>Strokes</th><th>To par</th><th>Differential</th><th>Fairways hit %</th><th>GIR %</th><th>Putts per hole</th><th>Penalties</th></tr>"
-    + (rows || '<tr><td colspan="10" class="muted">No rounds in this period.</td></tr>');
-  $("rl-note").textContent = t.rounds > t.rows.length ? `The latest ${t.rows.length} of ${t.rounds} rounds in this period. A dash means the round has too little data for that statistic.`
-    : "A dash means the round has too little data for that statistic.";
+  roundRows.garmin = t.rows;
+  renderGarminList();
 }
 
 async function garminRoundStats() {
   const s = await api("/api/rounds/garmin-summary");
   $("rs-table").innerHTML = `<tr><th>Statistic</th>${s.columns.map((c) => `<th>${c.title}<br><span class="pm">${c.rounds} rounds</span></th>`).join("")}</tr>`
     + s.rows.map((r) => `<tr><td>${r.title}</td>${s.columns.map((c) => `<td>${r.values[c.key] == null ? "–" : r.values[c.key]}</td>`).join("")}</tr>`).join("");
-  $("rs-note").textContent = `Full 18-hole rounds from ${dateLabel(s.first)} to ${dateLabel(s.last)}. Each percentage is calculated over all holes that have the data, not as the average of the rounds.`;
+  $("rs-note").textContent = s.first ? `Selected full 18-hole rounds from ${dateLabel(s.first)} to ${dateLabel(s.last)}. Each percentage is calculated over all holes that have the data, not as the average of the rounds.` : "No round is selected.";
 }
 
 // ---------------------------------------------------------------- Garmin
@@ -861,6 +927,8 @@ function wire() {
   $("browse-garmin").addEventListener("click", guard(() => browse("garmin")));
   $("browse-withings").addEventListener("click", guard(() => browse("withings")));
   $("browse-competition").addEventListener("click", guard(() => browse("competition")));
+  wireRoundSelection("competition", "rc-table");
+  wireRoundSelection("garmin", "rl-table");
   for (const id of ["rc-measure", "rc-period"]) $(id).addEventListener("change", guard(competitionRounds));
   for (const id of ["rg-measure", "rg-period"]) $(id).addEventListener("change", guard(garminRounds));
   for (const id of ["gm-outcome", "gm-club", "gm-detrend"]) $(id).addEventListener("change", guard(garminRefresh));

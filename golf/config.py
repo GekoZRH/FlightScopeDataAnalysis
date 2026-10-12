@@ -26,6 +26,7 @@ BAG_MODES = ("swing", "pitching")      # the kinds that have a bag and a printed
 # Every data folder the dashboard knows. "garmin" and "withings" are not practice data: they are the health
 # data (watch, scale) that the Health tab shows and that the practice results are related to.
 HEALTH_KINDS = ("garmin", "withings")
+ROUND_SOURCES = ("competition", "garmin")        # where rounds come from: the certificates, the Garmin app
 FOLDER_KINDS = MODES + HEALTH_KINDS + ("competition",)         # competition: the handicap certificates and the record of rounds
 
 
@@ -95,6 +96,7 @@ class Config:
     timezone: str = "Europe/Zurich"     # where the practice took place, to line it up with the watch (which uses UTC)
     default_bag: Dict[str, BagSpec] = field(default_factory=dict)   # golf.toml, before local choices
     excluded_sessions: Dict[str, frozenset] = field(default_factory=dict)   # mode -> session dates left out
+    excluded_rounds: Dict[str, frozenset] = field(default_factory=dict)     # "competition" / "garmin" -> keys of rounds left out
     local_path: Optional[Path] = None
 
     def data_dir(self, mode: str) -> Optional[Path]:
@@ -206,6 +208,8 @@ def load_config(path: Optional[Path] = None, local_path: Optional[Path] = None) 
         for mode, folder in (("swing", swing_dir), ("pitching", pitching_dir), ("stack", stack_dir))
     }
 
+    excluded_rounds = {source: frozenset(local.get("rounds", {}).get(source, {}).get("excluded", [])) for source in ROUND_SOURCES}
+
     return Config(
         root=root,
         swing_dir=swing_dir,
@@ -223,6 +227,7 @@ def load_config(path: Optional[Path] = None, local_path: Optional[Path] = None) 
         cards=cards,
         default_bag=default_bag,
         excluded_sessions=excluded,
+        excluded_rounds=excluded_rounds,
         local_path=local_path,
     )
 

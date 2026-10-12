@@ -58,7 +58,9 @@ def test_the_overview_offers_measures_and_years(world):
 def test_a_competition_trend_has_every_round_and_the_latest_averages(world):
     d = call(world, "/api/rounds/trend", source="competition", measure="gross")
     assert [p["value"] for p in d["points"]] == [80, 82, 84, 86, 88, 90, 92]
-    assert d["windows"] == [5, 10] and d["latest"]["short"] == pytest.approx(np.mean([84, 86, 88, 90, 92])) and d["latest"]["long"] == pytest.approx(86)
+    assert d["windows"] == [5] and d["latest"]["short"] == pytest.approx(np.mean([84, 86, 88, 90, 92])) and d["latest"]["long"] is None   # too few rounds for a long average
+    assert all(p["long"] is None for p in d["points"])
+    assert call(world, "/api/rounds/trend", source="garmin", measure="strokes")["windows"] == [5, 10]
     assert d["latest"]["all"] == pytest.approx(86)
 
 
@@ -128,7 +130,7 @@ def test_the_summary_has_three_columns(world):
 
 def test_the_latest_rounds_are_listed_newest_first(world):
     t = call(world, "/api/rounds/garmin-rounds")
-    assert t["rounds"] == 14 and t["rows"][0]["date"] == DAYS[-1].isoformat()
+    assert len(t["rows"]) == t["selected"] == 14 and t["rows"][0]["date"] == DAYS[-1].isoformat() and all(r["selected"] for r in t["rows"])
     first = t["rows"][0]
     assert first["course"] == "Golf Beispiel" and first["tee"] == "Weiss" and first["putts_18"] == 36
 
@@ -247,3 +249,82 @@ def test_the_round_outcome_needs_its_data(tmp_path):
     with pytest.raises(api.ApiError, match="No Garmin round data is loaded"):
         call(state, "/api/garmin/table", outcome="round_gir")
     assert "round_gir" not in [o["key"] for o in call(state, "/api/garmin/overview")["outcomes"]]
+
+
+# --- choosing the rounds that take part -----------------------------------------------------------------
+
+def keys(table):
+    return [r["key"] for r in table["rows"]]
+
+
+def test_every_round_has_a_key_and_starts_selected(world):
+    comp, garmin = call(world, "/api/rounds/competition"), call(world, "/api/rounds/garmin-rounds")
+    assert len(set(keys(comp))) == 7 and len(set(keys(garmin))) == 14
+    assert all(r["selected"] for r in comp["rows"] + garmin["rows"]) and comp["selected"] == 7
+    assert call(world, "/api/rounds/overview")["garmin"]["selected"] == 14
+
+
+def test_unticked_competition_rounds_leave_the_chart_and_the_averages(world):
+    all_keys = keys(call(world, "/api/rounds/competition"))                         # newest first
+    chosen = all_keys[:3]                                                             # the three newest: 92, 90, 88
+    table = call(world, "/api/rounds/select", method="POST", source="competition", selected=chosen)
+    assert table["selected"] == 3 and [r["selected"] for r in table["rows"]] == [True] * 3 + [False] * 4
+    d = call(world, "/api/rounds/trend", source="competition", measure="gross")
+    assert [p["value"] for p in d["points"]] == [88, 90, 92] and d["rounds"] == 3 and d["latest"]["all"] == pytest.approx(90)
+    assert call(world, "/api/rounds/overview")["competition"]["selected"] == 3 and call(world, "/api/rounds/overview")["competition"]["rounds"] == 7
+
+
+def test_unticked_garmin_rounds_leave_the_statistics(world):
+    rows = call(world, "/api/rounds/garmin-rounds")["rows"]
+    chosen = [r["key"] for r in rows[:4]]
+    call(world, "/api/rounds/select", method="POST", source="garmin", selected=chosen)
+    summary = call(world, "/api/rounds/garmin-summary")
+    assert [c["rounds"] for c in summary["columns"]] == [4, 4, 4] and summary["columns"][0]["title"] == "Selected rounds"
+    assert {r["key"]: r for r in summary["rows"]}["rounds"]["values"]["all"] == "4"
+    assert len(call(world, "/api/rounds/trend", source="garmin", measure="strokes")["points"]) == 4
+    assert [r["selected"] for r in call(world, "/api/rounds/garmin-rounds")["rows"]][:5] == [True] * 4 + [False]
+
+
+def test_unticked_rounds_also_leave_the_health_correlations(tmp_path):
+    state, _, _ = sleepy_rounds(tmp_path)
+    assert call(state, "/api/garmin/table", outcome="round_differential")["sessions"] == len(DAYS)
+    rows = call(state, "/api/rounds/garmin-rounds")["rows"]
+    call(state, "/api/rounds/select", method="POST", source="garmin", selected=[r["key"] for r in rows[:9]])
+    assert call(state, "/api/garmin/table", outcome="round_differential")["sessions"] == 9
+
+
+def test_the_choice_is_remembered_and_new_rounds_take_part(world, tmp_path):
+    rows = call(world, "/api/rounds/garmin-rounds")["rows"]
+    call(world, "/api/rounds/select", method="POST", source="garmin", selected=[r["key"] for r in rows[:5]])
+    again = AppState(world.config_path)                                              # a new start reads golf.local.json
+    assert call(again, "/api/rounds/garmin-rounds")["selected"] == 5
+    assert (tmp_path / "golf.local.json").is_file()
+    again.golf_stats = again.golf_stats.iloc[:-1]                                    # one round less loaded: the others keep their state
+    assert call(again, "/api/rounds/garmin-rounds")["selected"] <= 5
+    newer = again.golf_stats.iloc[[0]].copy()
+    newer["round_key"] = "9999"
+    import pandas as pd
+    again.golf_stats = pd.concat([again.golf_stats, newer], ignore_index=True)       # a round that was never ticked or unticked
+    table = call(again, "/api/rounds/garmin-rounds")
+    assert next(r for r in table["rows"] if r["key"] == "9999")["selected"] is True
+
+
+def test_the_two_sources_are_chosen_separately(world):
+    comp_keys = keys(call(world, "/api/rounds/competition"))
+    call(world, "/api/rounds/select", method="POST", source="competition", selected=comp_keys[:2])
+    assert call(world, "/api/rounds/garmin-rounds")["selected"] == 14
+
+
+def test_bad_selections_are_refused(world):
+    with pytest.raises(api.ApiError, match="at least one round"):
+        call(world, "/api/rounds/select", method="POST", source="garmin", selected=[])
+    with pytest.raises(api.ApiError, match="Not a round of the data"):
+        call(world, "/api/rounds/select", method="POST", source="garmin", selected=["nope"])
+    with pytest.raises(api.ApiError, match="Unknown source"):
+        call(world, "/api/rounds/select", method="POST", source="tv", selected=["1"])
+
+
+def test_choosing_rounds_of_an_unloaded_source_is_refused(tmp_path):
+    state = AppState(build_world(tmp_path, sleep_hours=[8.0] * len(DAYS), speed_for=lambda k: 90.0))
+    with pytest.raises(api.ApiError, match="rounds are loaded"):
+        call(state, "/api/rounds/select", method="POST", source="competition", selected=["x"])

@@ -148,6 +148,10 @@ The dashboard writes everything you choose to `golf.local.json`, next to `golf.t
   "pitching_dir": "C:\\data\\PitchingData\\Indoor",
   "stack_dir": "",
   "garmin_dir": "C:\\data\\garmindata",
+  "rounds": {
+    "competition": { "excluded": ["2026-05-24|Golf Kyburg|71/136/72.9|1"] },
+    "garmin": { "excluded": ["365964794"] }
+  },
   "sessions": {
     "swing": {
       "C:\\data\\SwingData\\Indoor": { "excluded": ["2026-03-14", "2026-03-15"] }
@@ -161,6 +165,7 @@ The dashboard writes everything you choose to `golf.local.json`, next to `golf.t
 ```
 
 - A folder set to `""` (as `stack_dir` above; `garmin_dir` works the same way) means you chose to have no data of that kind; the dashboard then does not use it. A kind that is not listed uses the default from `golf.toml`.
+- `rounds` stores the rounds you unticked in the Rounds tab, for the competition rounds (a key made of date, club, par/slope/rating and the order on that day) and for the Garmin rounds (the round number). Rounds that are not listed take part, so new rounds are included automatically.
 - `sessions` stores the sessions you left out, per data folder (for full swing, pitching and stack). Sessions you add later are not in the list, so they take part automatically.
 - `bag.swing.clubs` is always put in the standard order (driver, woods, hybrids, irons, wedges).
 - `bag.pitching.pairs` are (wedge, intent) combinations, with 12 meaning a full swing.

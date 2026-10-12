@@ -166,10 +166,12 @@ def summarise(rounds: pd.DataFrame, holes: pd.DataFrame, round_ids) -> Dict[str,
 def rolling_by_round(values: pd.Series, windows=(5, 10), minimum=(3, 5)) -> pd.DataFrame:
     """Averages of the last `windows[0]` and `windows[1]` rounds that have a value, one row per round (in the order given).
 
+    With one window only the short average is calculated (the long one stays empty), for sources with few rounds.
     A round without a value has no average of its own; the average of the rounds before it is not carried over.
     """
     present = values.dropna()
     out = pd.DataFrame(index=values.index, columns=["short", "long"], dtype=float)
     out.loc[present.index, "short"] = present.rolling(windows[0], min_periods=minimum[0]).mean()
-    out.loc[present.index, "long"] = present.rolling(windows[1], min_periods=minimum[1]).mean()
+    if len(windows) > 1:
+        out.loc[present.index, "long"] = present.rolling(windows[1], min_periods=minimum[1]).mean()
     return out

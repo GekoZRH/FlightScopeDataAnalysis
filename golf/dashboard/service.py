@@ -23,7 +23,7 @@ from golf.data import load_shots, unparsed_labels, unreadable_weights
 from golf.data.garmin import GarminData, describe_garmin, find_export_folders, load_garmin
 from golf.data.withings import WithingsData, describe_withings, find_weight_file, load_withings
 from golf.data.golfrounds import GolfRounds, describe_golf_rounds, load_golf_rounds
-from golf.data.competition import RECORD_NAME, load_record, update_record
+from golf.data.competition import RECORD_NAME, load_record, update_record, with_round_keys
 from golf.data.stack import stack_files
 from golf.data.labels import FULL_SWING
 from golf.report.build import generate_card
@@ -113,7 +113,9 @@ class AppState:
             self.errors["golf"] = str(error)
             return
         if len(golf.rounds):
-            self.golf, self.golf_stats = golf, round_stats(golf.rounds, golf.holes)
+            stats = round_stats(golf.rounds, golf.holes)
+            stats["round_key"] = stats["round_id"].astype(str)
+            self.golf, self.golf_stats = golf, stats
 
     def reload_competition(self) -> None:
         """Copy the rounds of the certificates (PDF) into the record, then read the record.
@@ -136,7 +138,7 @@ class AppState:
             self.errors["competition"] = str(error)
             return
         if len(record):
-            self.competition = record.sort_values(["date", "same_day"]).reset_index(drop=True)
+            self.competition = with_round_keys(record.sort_values(["date", "same_day"]).reset_index(drop=True))
 
     def reload_withings(self) -> None:
         folder = self.config.withings_dir
@@ -778,11 +780,11 @@ def _round_results(state: AppState, outcome: str, detrend: bool):
     """One result per day played from the rounds, the local time of each day's first round, and a title."""
     column = ROUND_OUTCOME_COLUMN[outcome]
     if outcome == "comp_differential":
-        record = state.competition
+        record = included_rounds(state, "competition")
         table = pd.DataFrame({"date": record["date"].astype(str), "value": record["differential"]})
         starts = pd.Series({day: pd.Timestamp(day) + pd.Timedelta(hours=COMPETITION_START_HOUR) for day in dict.fromkeys(table["date"])})
     else:
-        stats = state.golf_stats
+        stats = included_rounds(state, "garmin")
         table = pd.DataFrame({"date": stats["date"].astype(str), "value": stats[column]})
         local = stats["start_utc"].dt.tz_convert(state.config.timezone).dt.tz_localize(None)
         starts = pd.Series(local.to_numpy(), index=stats["date"].astype(str)).groupby(level=0).first().map(pd.Timestamp)
@@ -953,24 +955,45 @@ COMPETITION_MEASURES = {
 }
 SUMMARY_LAST_ROUNDS = 10
 SUMMARY_LAST_DAYS = 365
-ROUND_LIST_LIMIT = 40
+# source -> (the averages' windows in rounds, the rounds each needs). The competition record is too short for a long average.
+TREND_WINDOWS = {"competition": ((5,), (3,)), "garmin": ((5, 10), (3, 5))}
+
+
+def all_rounds(state: AppState, source: str) -> Optional[pd.DataFrame]:
+    """Every round of a source, oldest first, with a `round_key` that names it (None if the source is not loaded)."""
+    if source == "competition":
+        return state.competition
+    if source == "garmin":
+        return state.golf_stats
+    raise ValueError(f"Unknown source: {source}")
+
+
+def included_rounds(state: AppState, source: str) -> Optional[pd.DataFrame]:
+    """The rounds of a source that take part: all but those unticked in the Rounds tab."""
+    rounds = all_rounds(state, source)
+    if rounds is None:
+        return None
+    return rounds[~rounds["round_key"].isin(state.config.excluded_rounds.get(source, frozenset()))].reset_index(drop=True)
 
 
 def rounds_overview(state: AppState) -> Dict:
     """What the Rounds tab can show: the competition record and the Garmin rounds, with their measures and years."""
-    competition, golf = state.competition, state.golf_stats
+    competition, golf = included_rounds(state, "competition"), included_rounds(state, "garmin")
+    every = {source: all_rounds(state, source) for source in ("competition", "garmin")}
     return clean({
         "competition": {
-            "loaded": competition is not None,
-            "rounds": int(len(competition)) if competition is not None else 0,
+            "loaded": every["competition"] is not None,
+            "rounds": int(len(every["competition"])) if every["competition"] is not None else 0,
+            "selected": int(len(competition)) if competition is not None else 0,
             "derived": int(competition["gross_derived"].sum()) if competition is not None else 0,
             "measures": [{"key": key, "title": title} for key, (title, _) in COMPETITION_MEASURES.items()],
             "years": sorted({int(d[:4]) for d in competition["date"]}, reverse=True) if competition is not None else [],
             "notes": state.competition_notes, "error": state.errors.get("competition", ""),
         },
         "garmin": {
-            "loaded": golf is not None,
-            "rounds": int(len(golf)) if golf is not None else 0,
+            "loaded": every["garmin"] is not None,
+            "rounds": int(len(every["garmin"])) if every["garmin"] is not None else 0,
+            "selected": int(len(golf)) if golf is not None else 0,
             "measures": [{"key": key, "title": title} for key, (title, _) in ROUND_MEASURES.items()],
             "years": sorted({d.year for d in golf["date"]}, reverse=True) if golf is not None else [],
         },
@@ -979,14 +1002,14 @@ def rounds_overview(state: AppState) -> Dict:
 
 
 def _round_series(state: AppState, source: str, measure: str):
-    """Date, value and 'derived' flag of every round of one source, oldest first."""
+    """Date, value and 'derived' flag of the rounds of one source that take part, oldest first."""
     if source == "competition":
         if state.competition is None:
             raise ValueError("No competition rounds are loaded")
         if measure not in COMPETITION_MEASURES:
             raise ValueError(f"Unknown measure: {measure}")
         title, column = COMPETITION_MEASURES[measure]
-        frame = state.competition
+        frame = included_rounds(state, "competition")
         derived = frame["gross_derived"] if measure == "gross" else pd.Series(False, index=frame.index)
         return title, frame["date"].astype(str), pd.to_numeric(frame[column], errors="coerce"), derived
     if source == "garmin":
@@ -994,15 +1017,16 @@ def _round_series(state: AppState, source: str, measure: str):
             raise ValueError("No Garmin rounds are loaded")
         if measure not in ROUND_MEASURES:
             raise ValueError(f"Unknown measure: {measure}")
-        stats = state.golf_stats
+        stats = included_rounds(state, "garmin")
         return ROUND_MEASURES[measure][0], stats["date"].astype(str), pd.to_numeric(stats[measure], errors="coerce"), pd.Series(False, index=stats.index)
     raise ValueError(f"Unknown source: {source}")
 
 
 def rounds_trend(state: AppState, source: str, measure: str, period: str = "all") -> Dict:
-    """One measure round by round with the average of the last 5 and the last 10 rounds."""
+    """One measure round by round (the rounds that take part) with the average of the last rounds."""
     title, dates, values, derived = _round_series(state, source, measure)
-    means = rolling_by_round(values)
+    windows, minimum = TREND_WINDOWS[source]
+    means = rolling_by_round(values, windows, minimum)
     table = pd.DataFrame({"value": values.to_numpy(), "short": means["short"].to_numpy(), "long": means["long"].to_numpy(),
                           "derived": derived.to_numpy(), "date": dates.to_numpy()}, index=pd.to_datetime(dates).dt.date)
     table = _in_period(table, period)
@@ -1010,25 +1034,24 @@ def rounds_trend(state: AppState, source: str, measure: str, period: str = "all"
     points = [{"date": row["date"], "value": row["value"], "short": row["short"], "long": row["long"], "derived": bool(row["derived"])}
               for _, row in shown.iterrows()]
     latest = {"short": shown["short"].iloc[-1], "long": shown["long"].iloc[-1], "all": shown["value"].mean()} if len(shown) else None
-    return clean({"title": title, "points": points, "latest": latest, "rounds": int(len(table)), "windows": [5, 10],
+    return clean({"title": title, "points": points, "latest": latest, "rounds": int(len(table)), "windows": list(windows),
                   "derived": int(shown["derived"].sum())})
 
 
-def rounds_competition_table(state: AppState, period: str = "all") -> Dict:
-    """The rounds of the record, newest first, with the Garmin statistics of the same day where there is a Garmin round."""
+def rounds_competition_table(state: AppState) -> Dict:
+    """Every round of the record, newest first, with whether it takes part and the Garmin statistics of the same day."""
     if state.competition is None:
         raise ValueError("No competition rounds are loaded")
-    record = state.competition.copy()
-    record.index = pd.to_datetime(record["date"]).dt.date
-    record = _in_period(record, period)
+    excluded = state.config.excluded_rounds.get("competition", frozenset())
     garmin = {}
     if state.golf_stats is not None:
         for _, g in state.golf_stats.iterrows():
             garmin.setdefault(str(g["date"]), g)
     rows = []
-    for _, r in record.iloc[::-1].iterrows():
+    for _, r in state.competition.iloc[::-1].iterrows():
         g = garmin.get(r["date"])
         rows.append({
+            "key": r["round_key"], "selected": r["round_key"] not in excluded,
             "date": r["date"], "club": r["club"], "par": r["par"], "slope": r["slope"], "rating": r["course_rating"],
             "gross": r["gross"], "gross_derived": bool(r["gross_derived"]), "stableford": r["stableford"],
             "differential": r["differential"], "hcp_new": r["hcp_new"], "pcc": r["pcc"],
@@ -1036,42 +1059,60 @@ def rounds_competition_table(state: AppState, period: str = "all") -> Dict:
                                               "putts_per_hole": g["putts_per_hole"], "penalty_strokes": g["penalty_strokes"]},
         })
     linked = sum(1 for row in rows if row["garmin"] is not None)
-    return clean({"rows": rows, "linked": linked, "garmin_loaded": state.golf_stats is not None})
+    return clean({"rows": rows, "linked": linked, "garmin_loaded": state.golf_stats is not None,
+                  "selected": sum(1 for row in rows if row["selected"]), "last_days": SUMMARY_LAST_DAYS, "last_rounds": SUMMARY_LAST_ROUNDS})
 
 
-def rounds_garmin_summary(state: AppState) -> Dict:
-    """The statistics of the Garmin rounds: all rounds, the last 12 months and the last 10 rounds."""
-    if state.golf is None or state.golf_stats is None:
-        raise ValueError("No Garmin rounds are loaded")
-    rounds, holes, stats = state.golf.rounds, state.golf.holes, state.golf_stats
-    ids_all = list(stats["round_id"])
-    last_day = max(stats["date"])
-    since = pd.Timestamp(last_day) - pd.Timedelta(days=SUMMARY_LAST_DAYS)
-    ids_year = [i for i, d in zip(stats["round_id"], stats["date"]) if pd.Timestamp(d) > since]
-    ids_last = ids_all[-SUMMARY_LAST_ROUNDS:]
-    columns = [("all", "All rounds", ids_all), ("year", "Last 12 months", ids_year), ("last", f"Last {SUMMARY_LAST_ROUNDS} rounds", ids_last)]
-    results = {key: summarise(rounds, holes, ids) for key, _, ids in columns}
-    rows = [{"key": key, "title": title, "values": {c: (fmt.format(results[c][key]) if results[c][key] is not None and not pd.isna(results[c][key]) else None) for c, _, _ in columns}}
-            for key, title, fmt in SUMMARY_ROWS]
-    return clean({"columns": [{"key": key, "title": title, "rounds": len(ids)} for key, title, ids in columns], "rows": rows,
-                  "first": str(stats["date"].min()), "last": str(last_day)})
-
-
-def rounds_garmin_table(state: AppState, period: str = "all") -> Dict:
-    """The latest Garmin rounds, newest first."""
+def rounds_garmin_table(state: AppState) -> Dict:
+    """Every Garmin round, newest first, with whether it takes part."""
     if state.golf_stats is None:
         raise ValueError("No Garmin rounds are loaded")
-    stats = state.golf_stats.copy()
-    stats.index = pd.to_datetime(stats["date"]).dt.date
-    stats = _in_period(stats, period)
+    excluded = state.config.excluded_rounds.get("garmin", frozenset())
     rows = []
-    for _, r in stats.iloc[::-1].head(ROUND_LIST_LIMIT).iterrows():
+    for _, r in state.golf_stats.iloc[::-1].iterrows():
         rows.append({
+            "key": r["round_key"], "selected": r["round_key"] not in excluded,
             "date": str(r["date"]), "course": r["course"], "tee": r["tee"], "strokes": r["strokes"], "to_par": r["to_par"],
             "differential": r["differential"], "fir_pct": r["fir_pct"], "gir_pct": r["gir_pct"],
             "putts_per_hole": r["putts_per_hole"], "putts_18": r["putts_18"], "penalty_strokes": r["penalty_strokes"],
         })
-    return clean({"rows": rows, "rounds": int(len(stats)), "limit": ROUND_LIST_LIMIT})
+    return clean({"rows": rows, "selected": sum(1 for row in rows if row["selected"]), "last_days": SUMMARY_LAST_DAYS, "last_rounds": SUMMARY_LAST_ROUNDS})
+
+
+def rounds_select(state: AppState, source: str, selected: List[str]) -> Dict:
+    """Choose the rounds of a source that take part; rounds that come later take part automatically."""
+    rounds = all_rounds(state, source)
+    if rounds is None:
+        raise ValueError(f"No {'competition' if source == 'competition' else 'Garmin'} rounds are loaded")
+    every = set(rounds["round_key"])
+    unknown = sorted(set(selected) - every)
+    if unknown:
+        raise ValueError(f"Not a round of the data: {', '.join(unknown[:3])}")
+    if not selected:
+        raise ValueError("Select at least one round")
+    with state.lock:
+        update_local_settings(state.config, {"rounds": {source: {"excluded": sorted(every - set(selected))}}})
+        state.reload_config()
+    return rounds_competition_table(state) if source == "competition" else rounds_garmin_table(state)
+
+
+def rounds_garmin_summary(state: AppState) -> Dict:
+    """The statistics of the Garmin rounds that take part: all, the last 12 months and the last 10 rounds."""
+    if state.golf is None or state.golf_stats is None:
+        raise ValueError("No Garmin rounds are loaded")
+    stats = included_rounds(state, "garmin")
+    rounds, holes = state.golf.rounds, state.golf.holes
+    ids_all = list(stats["round_id"])
+    last_day = max(stats["date"]) if len(stats) else None
+    since = pd.Timestamp(last_day) - pd.Timedelta(days=SUMMARY_LAST_DAYS) if last_day else None
+    ids_year = [i for i, d in zip(stats["round_id"], stats["date"]) if pd.Timestamp(d) > since] if last_day else []
+    ids_last = ids_all[-SUMMARY_LAST_ROUNDS:]
+    columns = [("all", "Selected rounds", ids_all), ("year", "Last 12 months", ids_year), ("last", f"Last {SUMMARY_LAST_ROUNDS} rounds", ids_last)]
+    results = {key: summarise(rounds, holes, ids) for key, _, ids in columns}
+    rows = [{"key": key, "title": title, "values": {c: (fmt.format(results[c][key]) if results[c][key] is not None and not pd.isna(results[c][key]) else None) for c, _, _ in columns}}
+            for key, title, fmt in SUMMARY_ROWS]
+    return clean({"columns": [{"key": key, "title": title, "rounds": len(ids)} for key, title, ids in columns], "rows": rows,
+                  "first": str(stats["date"].min()) if len(stats) else "", "last": str(last_day) if last_day else ""})
 
 
 # --- sessions -------------------------------------------------------------------------------------

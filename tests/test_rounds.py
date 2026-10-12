@@ -163,3 +163,8 @@ def test_a_round_without_a_value_has_no_average_and_is_skipped_in_the_next():
     values = pd.Series([1.0, 2.0, 3.0, np.nan, 5.0, 6.0, 7.0])
     out = rolling_by_round(values, windows=(3, 5), minimum=(3, 5))
     assert np.isnan(out["short"].iloc[3]) and out["short"].iloc[4] == pytest.approx(10 / 3)             # 2, 3 and 5
+
+
+def test_with_one_window_only_the_short_average_is_given():
+    out = rolling_by_round(pd.Series([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]), windows=(3,), minimum=(2,))
+    assert out["short"].iloc[1] == pytest.approx(1.5) and out["short"].iloc[5] == pytest.approx(5.0) and out["long"].isna().all()
