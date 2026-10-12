@@ -141,6 +141,15 @@ async function renderDatasets(datasets) {
   if (!g.enabled) parts.push("Garmin: no folder chosen");
   else if (!g.loaded) parts.push(`Garmin: not loaded (${g.error || "no data"})`);
   else parts.push(`Garmin: ${g.nights} nights, ${g.strength} strength and ${g.cardio} cardio sessions, up to ${dateLabel(g.last)}`);
+  const cp = datasets.competition;
+  $("competition-dir").value = cp.folder;
+  if (!cp.enabled) parts.push("Competition: no folder chosen");
+  else if (!cp.loaded) parts.push(`Competition: not loaded (${cp.error || "no rounds"})`);
+  else parts.push(`Competition: ${cp.rounds} rounds, ${dateLabel(cp.first)} to ${dateLabel(cp.last)}`);
+  if (cp.enabled && cp.error && cp.loaded) warnings.push(`Competition: the certificate could not be read (${cp.error}); the record made so far is used.`);
+  for (const note of (cp.notes || [])) warnings.push(`Competition: ${note}`);
+  const gf = datasets.golf;
+  if (gf && gf.loaded) parts.push(`Garmin rounds: ${gf.rounds} full rounds, ${dateLabel(gf.first)} to ${dateLabel(gf.last)}`);
   const w = datasets.withings;
   $("withings-dir").value = w.folder;
   if (!w.enabled) parts.push("Withings: no folder chosen");
@@ -157,11 +166,13 @@ let available = {};
 function applyAvailability(datasets) {
   const loaded = (mode) => Boolean(datasets[mode] && datasets[mode].loaded);
   const any = loaded("swing") || loaded("pitching") || loaded("stack");
-  const anyData = any || loaded("garmin") || loaded("withings");            // health data alone has its own tab
+  const rounds = loaded("competition") || Boolean(datasets.golf && datasets.golf.loaded);
+  const anyData = any || loaded("garmin") || loaded("withings") || rounds;  // health data and rounds alone have their own tabs
   available = {
     sessions: any, swing: loaded("swing"), bag: loaded("swing"),
     pitching: loaded("pitching"), wedges: loaded("pitching"), stack: loaded("stack"),
     garmin: loaded("garmin") || loaded("withings"),
+    rounds,
   };
   document.querySelectorAll(".tab").forEach((tab) => (tab.hidden = !available[tab.dataset.tab]));
   $("tabs").hidden = !anyData;
@@ -170,13 +181,14 @@ function applyAvailability(datasets) {
 }
 
 function firstAvailableTab() {
-  return ["swing", "pitching", "stack", "sessions", "garmin"].find((name) => available[name]);
+  return ["swing", "pitching", "stack", "sessions", "rounds", "garmin"].find((name) => available[name]);
 }
 
 async function loadData() {
   const body = {
     swing_dir: $("swing-dir").value.trim(), pitching_dir: $("pitching-dir").value.trim(), stack_dir: $("stack-dir").value.trim(),
     garmin_dir: $("garmin-dir").value.trim(), withings_dir: $("withings-dir").value.trim(),
+    competition_dir: $("competition-dir").value.trim(),
   };
   const data = await api("/api/load", { body });
   await renderDatasets(data.datasets);
@@ -503,6 +515,92 @@ async function loadStack() {
   sessionChart("stack-progress", d.dates, series, { title: "Club head speed (mph)", band: false, height: 460 });
 }
 
+// ---------------------------------------------------------------- rounds
+
+function periodChoices(days, years) {
+  return [["all", "All data"], ...days.map((n) => [`days:${n}`, n === 90 ? "Last 3 months" : n === 365 ? "Last 12 months" : `Last ${n} days`]),
+    ...years.map((y) => [`year:${y}`, String(y)])];
+}
+
+async function loadRounds() {
+  const o = await api("/api/rounds/overview");
+  const c = o.competition, g = o.garmin;
+  for (const id of ["rc-card"]) $(id).hidden = !c.loaded;
+  for (const id of ["rg-card", "rs-card", "rl-card"]) $(id).hidden = !g.loaded;
+  fillSelect($("rc-measure"), c.measures.map((m) => m.key), c.measures.map((m) => m.title));
+  fillSelect($("rg-measure"), g.measures.map((m) => m.key), g.measures.map((m) => m.title));
+  const cp = periodChoices(o.days, c.years), gp = periodChoices(o.days, g.years);
+  fillSelect($("rc-period"), cp.map((p) => p[0]), cp.map((p) => p[1]));
+  fillSelect($("rg-period"), gp.map((p) => p[0]), gp.map((p) => p[1]));
+  await Promise.all([c.loaded ? competitionRounds() : null, g.loaded ? garminRounds() : null, g.loaded ? garminRoundStats() : null]);
+}
+
+// One measure round by round: dots, the average of the last 5 rounds and of the last 10.
+function roundChart(id, d) {
+  const dates = d.points.map((p) => p.date);
+  const solid = d.points.filter((p) => !p.derived), open = d.points.filter((p) => p.derived);
+  const [short, long] = d.windows;
+  const traces = [
+    { x: solid.map((p) => p.date), y: solid.map((p) => p.value), mode: "markers", name: "rounds", marker: { size: 7, color: rgba("#378ADD", 0.5) },
+      customdata: solid.map((p) => dateLabel(p.date)), hovertemplate: "%{customdata}: %{y:.1f}<extra></extra>" },
+    { x: open.map((p) => p.date), y: open.map((p) => p.value), mode: "markers", name: "calculated", marker: { size: 8, symbol: "circle-open", color: "#378ADD", line: { width: 2 } },
+      customdata: open.map((p) => dateLabel(p.date)), hovertemplate: "%{customdata}: %{y:.1f} (calculated)<extra></extra>", visible: open.length ? true : "legendonly", showlegend: open.length > 0 },
+    { x: dates, y: d.points.map((p) => p.short), mode: "lines", line: { color: rgba("#378ADD", 0.8), width: 1.5 }, name: `last ${short} rounds`, connectgaps: false,
+      hovertemplate: `last ${short} rounds: %{y:.1f}<extra></extra>` },
+    { x: dates, y: d.points.map((p) => p.long), mode: "lines", line: { color: css("--accent"), width: 3.5 }, name: `last ${long} rounds`, connectgaps: false,
+      hovertemplate: `last ${long} rounds: %{y:.1f}<extra></extra>` },
+  ];
+  draw(id, traces, baseLayout({ xaxis: { type: "date", showgrid: true }, yaxis: { title: { text: d.title }, showgrid: true }, legend: { orientation: "h", y: 1.12 } }));
+}
+
+function roundNote(d) {
+  const n = (v) => (v == null ? "–" : v.toFixed(1));
+  return d.latest
+    ? `${d.points.length} of ${d.rounds} rounds have a value. Latest: average of the last ${d.windows[0]} rounds ${n(d.latest.short)}, of the last ${d.windows[1]} rounds ${n(d.latest.long)}; whole period ${n(d.latest.all)}.`
+    : "No rounds with this measure in this period.";
+}
+
+async function competitionRounds() {
+  const period = $("rc-period").value;
+  const [d, t] = await Promise.all([
+    api("/api/rounds/trend", { params: { source: "competition", measure: $("rc-measure").value, period } }),
+    api("/api/rounds/competition", { params: { period } }),
+  ]);
+  roundChart("rc-plot", d);
+  $("rc-note").textContent = roundNote(d);
+  const g = (row, key, digits) => (row.garmin && row.garmin[key] != null ? num(row.garmin[key], digits) : "–");
+  const withGarmin = t.garmin_loaded;
+  const rows = t.rows.map((r) => `<tr><td>${dateLabel(r.date)}</td><td style="text-align:left">${r.club}</td><td>${r.par}/${r.slope}/${num(r.rating)}</td>`
+    + `<td>${r.gross_derived ? `<i title="calculated from the differential">${num(r.gross, 0)}*</i>` : num(r.gross, 0)}</td><td>${num(r.stableford, 0)}</td><td>${num(r.differential)}</td><td>${num(r.hcp_new)}</td>`
+    + (withGarmin ? `<td>${g(r, "fir_pct", 0)}</td><td>${g(r, "gir_pct", 0)}</td><td>${g(r, "putts_per_hole", 2)}</td><td>${g(r, "penalty_strokes", 0)}</td>` : "") + "</tr>");
+  $("rc-table").innerHTML = "<tr><th>Date</th><th>Club</th><th>Par / slope / rating</th><th>Strokes</th><th>Stableford</th><th>Differential</th><th>Handicap after</th>"
+    + (withGarmin ? "<th>Fairways hit %</th><th>GIR %</th><th>Putts per hole</th><th>Penalties</th>" : "") + "</tr>"
+    + (rows.join("") || '<tr><td colspan="11" class="muted">No rounds in this period.</td></tr>');
+  const derived = t.rows.filter((r) => r.gross_derived).length;
+  $("rc-table-note").textContent = (derived ? `* strokes calculated from the differential, the course rating, the slope and the PCC, because the certificate does not list them (${derived}). ` : "")
+    + (withGarmin ? `The last four columns are the statistics of a Garmin round on the same day: ${t.linked} of ${t.rows.length} competition rounds have one.` : "");
+}
+
+async function garminRounds() {
+  const d = await api("/api/rounds/trend", { params: { source: "garmin", measure: $("rg-measure").value, period: $("rg-period").value } });
+  roundChart("rg-plot", d);
+  $("rg-note").textContent = roundNote(d);
+  const t = await api("/api/rounds/garmin-rounds", { params: { period: $("rg-period").value } });
+  const rows = t.rows.map((r) => `<tr><td>${dateLabel(r.date)}</td><td style="text-align:left">${r.course}</td><td>${r.tee}</td><td>${num(r.strokes, 0)}</td><td>${num(r.to_par, 0)}</td><td>${num(r.differential)}</td>`
+    + `<td>${num(r.fir_pct, 0)}</td><td>${num(r.gir_pct, 0)}</td><td>${num(r.putts_per_hole, 2)}</td><td>${num(r.penalty_strokes, 0)}</td></tr>`).join("");
+  $("rl-table").innerHTML = "<tr><th>Date</th><th>Course</th><th>Tee</th><th>Strokes</th><th>To par</th><th>Differential</th><th>Fairways hit %</th><th>GIR %</th><th>Putts per hole</th><th>Penalties</th></tr>"
+    + (rows || '<tr><td colspan="10" class="muted">No rounds in this period.</td></tr>');
+  $("rl-note").textContent = t.rounds > t.rows.length ? `The latest ${t.rows.length} of ${t.rounds} rounds in this period. A dash means the round has too little data for that statistic.`
+    : "A dash means the round has too little data for that statistic.";
+}
+
+async function garminRoundStats() {
+  const s = await api("/api/rounds/garmin-summary");
+  $("rs-table").innerHTML = `<tr><th>Statistic</th>${s.columns.map((c) => `<th>${c.title}<br><span class="pm">${c.rounds} rounds</span></th>`).join("")}</tr>`
+    + s.rows.map((r) => `<tr><td>${r.title}</td>${s.columns.map((c) => `<td>${r.values[c.key] == null ? "–" : r.values[c.key]}</td>`).join("")}</tr>`).join("");
+  $("rs-note").textContent = `Full 18-hole rounds from ${dateLabel(s.first)} to ${dateLabel(s.last)}. Each percentage is calculated over all holes that have the data, not as the average of the rounds.`;
+}
+
 // ---------------------------------------------------------------- Garmin
 
 function garminParams() {
@@ -743,7 +841,7 @@ async function makeCard(mode, prefix) {
 
 // ---------------------------------------------------------------- tabs and start
 
-const refreshers = { sessions: loadSessions, swing: loadSwing, pitching: loadPitching, stack: loadStack, garmin: loadGarmin, bag: loadBag, wedges: loadWedges };
+const refreshers = { sessions: loadSessions, swing: loadSwing, pitching: loadPitching, stack: loadStack, rounds: loadRounds, garmin: loadGarmin, bag: loadBag, wedges: loadWedges };
 
 async function showTab(name) {
   currentTab = name;
@@ -762,6 +860,9 @@ function wire() {
   $("browse-stack").addEventListener("click", guard(() => browse("stack")));
   $("browse-garmin").addEventListener("click", guard(() => browse("garmin")));
   $("browse-withings").addEventListener("click", guard(() => browse("withings")));
+  $("browse-competition").addEventListener("click", guard(() => browse("competition")));
+  for (const id of ["rc-measure", "rc-period"]) $(id).addEventListener("change", guard(competitionRounds));
+  for (const id of ["rg-measure", "rg-period"]) $(id).addEventListener("change", guard(garminRounds));
   for (const id of ["gm-outcome", "gm-club", "gm-detrend"]) $(id).addEventListener("change", guard(garminRefresh));
   $("gm-predictor").addEventListener("change", guard(garminScatter));
   for (const id of ["ht-measure", "ht-period"]) $(id).addEventListener("change", guard(healthTrend));

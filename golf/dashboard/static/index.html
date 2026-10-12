@@ -36,6 +36,11 @@
       <input type="text" id="withings-dir" spellcheck="false" placeholder="no Withings data (the Health Mate export folder with weight.csv)">
       <button id="browse-withings" type="button">Browse</button>
     </div>
+    <div class="folder-row">
+      <label for="competition-dir">Competition results</label>
+      <input type="text" id="competition-dir" spellcheck="false" placeholder="no competition results (the folder with your handicap certificate PDF)">
+      <button id="browse-competition" type="button">Browse</button>
+    </div>
     <div class="row between">
       <div class="muted" id="data-status">Loading…</div>
       <button id="load" type="button">Load data</button>
@@ -46,7 +51,7 @@
 
   <div class="card" id="no-data" hidden>
     <h2>No data yet</h2>
-    <p class="muted">Enter the folder with your exported sessions above (full swing, pitching or stack data) and press Load data. You only need the kinds of data you have; leave the other folders empty. Garmin or Withings data alone is fine too: the Health tab then shows your trends and how your health measures relate to each other.</p>
+    <p class="muted">Enter the folder with your exported sessions above (full swing, pitching or stack data) and press Load data. You only need the kinds of data you have; leave the other folders empty. Garmin, Withings or competition data alone is fine too: the Health tab then shows your trends and how your health measures relate to each other, and the Rounds tab your scores.</p>
   </div>
 
   <nav class="tabs" role="tablist" id="tabs">
@@ -54,6 +59,7 @@
     <button class="tab on" data-tab="swing" role="tab">Full swing</button>
     <button class="tab" data-tab="pitching" role="tab">Pitching</button>
     <button class="tab" data-tab="stack" role="tab">Stack</button>
+    <button class="tab" data-tab="rounds" role="tab">Rounds</button>
     <button class="tab" data-tab="garmin" role="tab">Health</button>
     <span class="grow"></span>
     <button class="tab" data-tab="bag" role="tab">Bag</button>
@@ -262,6 +268,57 @@
       </div>
       <div id="stack-progress" class="plot tall"></div>
       <p class="muted small">Average club head speed of all swings with that weight in each selected session. A weight has a point only in the sessions in which it was used, and its line continues across the others. Heavy weights are red, light weights blue, and every weight has its own marker shape. Hover a point for the number of swings and the 95% interval.</p>
+    </div>
+  </section>
+
+  <section id="tab-rounds" hidden>
+    <div class="card" id="rc-card">
+      <div class="row between">
+        <h2>Competition scores</h2>
+        <div class="controls">
+          <label>Measure <select id="rc-measure"></select></label>
+          <label>Period <select id="rc-period"></select></label>
+        </div>
+      </div>
+      <p class="muted small" style="margin:0 0 6px">Every round on your handicap certificate, kept on record even after it drops off the certificate (see the data folder note in the guide). The thin line is the average of the last 5 rounds, the bold line the average of the last 10. An open circle is a number that was calculated, not read from the certificate.</p>
+      <div id="rc-plot" class="plot tall"></div>
+      <p class="muted small" id="rc-note"></p>
+      <div class="table-wrap"><table id="rc-table"></table></div>
+      <p class="muted small" id="rc-table-note"></p>
+    </div>
+
+    <div class="card" id="rg-card">
+      <div class="row between">
+        <h2>Rounds from the Garmin app</h2>
+        <div class="controls">
+          <label>Measure <select id="rg-measure"></select></label>
+          <label>Period <select id="rg-period"></select></label>
+        </div>
+      </div>
+      <p class="muted small" style="margin:0 0 6px">Only full rounds of 18 holes. The thin line is the average of the last 5 rounds that have the measure, the bold line the average of the last 10. A round is left out of a statistic when too few of its holes have the data (for example putts).</p>
+      <div id="rg-plot" class="plot tall"></div>
+      <p class="muted small" id="rg-note"></p>
+    </div>
+
+    <div class="card" id="rs-card">
+      <h2>Statistics of the Garmin rounds</h2>
+      <div class="table-wrap"><table id="rs-table"></table></div>
+      <p class="muted small" id="rs-note"></p>
+    </div>
+
+    <div class="card" id="rl-card">
+      <h2>Latest Garmin rounds</h2>
+      <div class="table-wrap"><table id="rl-table"></table></div>
+      <p class="muted small" id="rl-note"></p>
+    </div>
+
+    <div class="card">
+      <h2>How to read this</h2>
+      <ul class="muted small" style="margin:6px 0 0;padding-left:20px">
+        <li>The score differential, (strokes - course rating) x 113 / slope, makes rounds on different courses and tees comparable. Lower is better.</li>
+        <li>Greens in regulation and scrambling are calculated from strokes, putts and the par of each hole; a penalty stroke makes a hole count as stricter. Holes without recorded putts or fairway outcome are left out of the statistic, not guessed.</li>
+        <li>To see whether sleep, training or weight go with your scores, choose one of the round results in the Health tab (<i>What goes with a good session?</i>).</li>
+      </ul>
     </div>
   </section>
 

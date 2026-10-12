@@ -2,7 +2,7 @@
 
 Analysis of FlightScope indoor practice sessions and of stack (overspeed) training, in two parts, plus an optional look at how your sleep and training (from a Garmin watch) relate to your results:
 
-- **A dashboard** to review the latest session, follow your progress over time, and see how your carry and your misses are distributed, for full swings and for wedge swings with different intents (9, 10, 11 o'clock), and the progress of your stack training per weight. The **Health** tab shows your Garmin sleep and recovery trends and your Withings weight and body composition, and relates your results to sleep, recovery and strength or cardio training before each session.
+- **A dashboard** to review the latest session, follow your progress over time, and see how your carry and your misses are distributed, for full swings and for wedge swings with different intents (9, 10, 11 o'clock), and the progress of your stack training per weight. The **Rounds** tab follows your competition scores (kept on record from the handicap certificate PDF) and the statistics of your rounds from the Garmin app (fairways, greens, putting). The **Health** tab shows your Garmin sleep and recovery trends and your Withings weight and body composition, and relates your results to sleep, recovery and strength or cardio training before each session.
 - **Printed cards** with the carry distance of each club and its distribution, to take to the course.
 
 Everything runs on your own computer. The data never leaves it.

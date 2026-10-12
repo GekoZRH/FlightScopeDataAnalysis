@@ -22,6 +22,8 @@ from golf.config import FOLDER_KINDS, MODES, BagSpec, Config, load_config, updat
 from golf.data import load_shots, unparsed_labels, unreadable_weights
 from golf.data.garmin import GarminData, describe_garmin, find_export_folders, load_garmin
 from golf.data.withings import WithingsData, describe_withings, find_weight_file, load_withings
+from golf.data.golfrounds import GolfRounds, describe_golf_rounds, load_golf_rounds
+from golf.data.competition import RECORD_NAME, load_record, update_record
 from golf.data.stack import stack_files
 from golf.data.labels import FULL_SWING
 from golf.report.build import generate_card
@@ -34,7 +36,8 @@ from golf.stats.context import ALL_PREDICTORS, available_predictors, session_con
 from golf.stats.correlation import correlate
 from golf.stats.daily import DAILY_MEASURES, available_measures, daily_table, rolling_means, windows_for
 from golf.stats.difference import mean_difference
-from golf.stats.outcomes import stack_speed, swing_spread, swing_speed
+from golf.stats.outcomes import round_result, stack_speed, swing_spread, swing_speed
+from golf.stats.rounds import ROUND_MEASURES, SUMMARY_ROWS, round_stats, rolling_by_round, summarise
 
 # What a session is compared with ("historic"):
 #   last4     the 4 sessions before it, among all loaded sessions (selected or not)
@@ -55,6 +58,10 @@ class AppState:
         self.shots: Dict[str, Optional[pd.DataFrame]] = {mode: None for mode in MODES}
         self.garmin: Optional[GarminData] = None
         self.withings: Optional[WithingsData] = None
+        self.golf: Optional[GolfRounds] = None                  # full rounds of the Garmin export
+        self.golf_stats: Optional[pd.DataFrame] = None          # one row per round with its statistics
+        self.competition: Optional[pd.DataFrame] = None         # the record of competition rounds
+        self.competition_notes: List[str] = []                  # things to check after reading the certificates
         self.errors: Dict[str, str] = {}
         self.reload_data()
 
@@ -64,6 +71,8 @@ class AppState:
     def reload_data(self, modes=MODES) -> None:
         self.reload_garmin()
         self.reload_withings()
+        self.reload_golf()
+        self.reload_competition()
         for mode in modes:
             if self.config.data_dir(mode) is None:        # no folder chosen: this kind of data is not used
                 self.shots[mode] = None
@@ -88,6 +97,46 @@ class AppState:
         except (FileNotFoundError, ValueError, OSError) as error:
             self.garmin = None
             self.errors["garmin"] = str(error)
+
+    def reload_golf(self) -> None:
+        """The full rounds in the Garmin export. An export without golf data is not an error."""
+        folder = self.config.garmin_dir
+        self.golf, self.golf_stats = None, None
+        self.errors.pop("golf", None)
+        if folder is None:
+            return
+        try:
+            golf = load_golf_rounds(folder, self.config.timezone)
+        except FileNotFoundError:
+            return
+        except (ValueError, OSError, KeyError) as error:
+            self.errors["golf"] = str(error)
+            return
+        if len(golf.rounds):
+            self.golf, self.golf_stats = golf, round_stats(golf.rounds, golf.holes)
+
+    def reload_competition(self) -> None:
+        """Copy the rounds of the certificates (PDF) into the record, then read the record.
+
+        If a PDF cannot be read (for example pypdf is not installed) the record made so far is still used.
+        """
+        folder = self.config.competition_dir
+        self.competition, self.competition_notes = None, []
+        self.errors.pop("competition", None)
+        if folder is None:
+            return
+        try:
+            report = update_record(folder)
+            self.competition_notes = [f"check: {t}" for t in report.warnings] + [f"not in the record, could not be read: {t}" for t in report.unread]
+        except Exception as error:                              # a bad PDF or a missing package must not stop the dashboard
+            self.errors["competition"] = str(error)
+        try:
+            record = load_record(folder)
+        except (ValueError, OSError) as error:
+            self.errors["competition"] = str(error)
+            return
+        if len(record):
+            self.competition = record.sort_values(["date", "same_day"]).reset_index(drop=True)
 
     def reload_withings(self) -> None:
         folder = self.config.withings_dir
@@ -174,6 +223,20 @@ def dataset_info(state: AppState) -> Dict:
         info["garmin"] = {"folder": str(garmin_folder), "enabled": True, "loaded": False, "error": state.errors.get("garmin", "")}
     else:
         info["garmin"] = {"folder": str(garmin_folder), "enabled": True, "loaded": True, **describe_garmin(state.garmin)}
+    competition_folder = state.config.competition_dir
+    if competition_folder is None:
+        info["competition"] = {"folder": "", "enabled": False, "loaded": False, "error": ""}
+    elif state.competition is None:
+        info["competition"] = {"folder": str(competition_folder), "enabled": True, "loaded": False, "error": state.errors.get("competition", "")}
+    else:
+        record = state.competition
+        info["competition"] = {
+            "folder": str(competition_folder), "enabled": True, "loaded": True, "rounds": int(len(record)),
+            "first": str(record["date"].min()), "last": str(record["date"].max()),
+            "notes": state.competition_notes, "error": state.errors.get("competition", ""),
+        }
+    info["golf"] = {"enabled": state.config.garmin_dir is not None, "loaded": state.golf is not None, "error": state.errors.get("golf", ""),
+                    **(describe_golf_rounds(state.golf) if state.golf is not None else {})}
     withings_folder = state.config.withings_dir
     if withings_folder is None:
         info["withings"] = {"folder": "", "enabled": False, "loaded": False, "error": ""}
@@ -205,6 +268,9 @@ def set_folders(state: AppState, folders: Dict[str, Optional[str]]) -> Dict:
             find_export_folders(folder)                       # raises if this is not a Garmin export
         elif mode == "withings":
             find_weight_file(folder)                          # raises if this is not a Withings export
+        elif mode == "competition":
+            if not (any(folder.glob("*.pdf")) or (folder / RECORD_NAME).is_file()):
+                raise ValueError(f"No handicap certificate (PDF) or {RECORD_NAME} found in {value}")
         elif not (bool(stack_files(folder)) if mode == "stack" else any(folder.glob("*.csv"))):
             raise ValueError(f"No CSV files found in {value}")
         patch[f"{mode}_dir"] = str(folder)
@@ -635,7 +701,15 @@ OUTCOMES = {
     "stack_speed": ("Stack training: speed", "stack"),
     "swing_speed": ("Full swing: club head speed", "swing"),
     "swing_spread": ("Full swing: carry spread", "swing"),
+    "comp_differential": ("Competition rounds: score differential", "competition"),
+    "round_differential": ("Garmin rounds: score differential", "rounds"),
+    "round_fir": ("Garmin rounds: fairways hit (%)", "rounds"),
+    "round_gir": ("Garmin rounds: greens in regulation (%)", "rounds"),
+    "round_putts": ("Garmin rounds: putts per hole", "rounds"),
 }
+ROUND_OUTCOME_COLUMN = {"comp_differential": "differential", "round_differential": "differential",
+                        "round_fir": "fir_pct", "round_gir": "gir_pct", "round_putts": "putts_per_hole"}
+COMPETITION_START_HOUR = 9      # the certificate has no start time: a round is taken to start at 9:00
 
 
 def _garmin_ready(state: AppState, outcome: str) -> None:
@@ -644,8 +718,17 @@ def _garmin_ready(state: AppState, outcome: str) -> None:
     if outcome not in OUTCOMES:
         raise ValueError(f"Unknown result: {outcome}")
     needed = OUTCOMES[outcome][1]
-    if state.included(needed) is None:
-        raise ValueError(f"No {needed} data is loaded")
+    if not _has_results(state, needed):
+        raise ValueError(f"No {'Garmin round' if needed == 'rounds' else needed} data is loaded")
+
+
+def _has_results(state: AppState, kind: str) -> bool:
+    """Whether the data that a result needs is loaded: practice data, the record of competition rounds, or Garmin rounds."""
+    if kind == "competition":
+        return state.competition is not None
+    if kind == "rounds":
+        return state.golf_stats is not None
+    return state.included(kind) is not None
 
 
 def garmin_overview(state: AppState) -> Dict:
@@ -655,7 +738,7 @@ def garmin_overview(state: AppState) -> Dict:
         return {"loaded": False, "outcomes": [], "predictors": [], "clubs": [], "daily": []}
     swing = state.selected("swing")
     garmin = state.garmin is not None                       # the sleep comparison needs the watch
-    available = {kind: state.included(kind) is not None for kind in ("swing", "stack")}
+    available = {kind: _has_results(state, kind) for kind in ("swing", "stack", "competition", "rounds")}
     table = _health_table(state)
     return clean({
         "loaded": True,
@@ -673,6 +756,8 @@ def garmin_overview(state: AppState) -> Dict:
 def _session_results(state: AppState, outcome: str, club: Optional[str], detrend: bool):
     """One result per session (see golf.stats.outcomes), the local time of each session's first swing, and a title."""
     _garmin_ready(state, outcome)
+    if outcome in ROUND_OUTCOME_COLUMN:
+        return _round_results(state, outcome, detrend)
     if outcome == "stack_speed":
         shots = state.included("stack").dropna(subset=["weight_g", "club_speed_mph"])
         results = stack_speed(shots, detrend=detrend)
@@ -686,6 +771,25 @@ def _session_results(state: AppState, outcome: str, club: Optional[str], detrend
         results = function(shots, detrend=detrend, club=club or None)
         title = f"{what} compared with the {'trend' if detrend else 'usual'} (%)" + (f", {club}" if club else "")
     starts = shots.groupby("session_date")["timestamp"].min()
+    return results, starts, title
+
+
+def _round_results(state: AppState, outcome: str, detrend: bool):
+    """One result per day played from the rounds, the local time of each day's first round, and a title."""
+    column = ROUND_OUTCOME_COLUMN[outcome]
+    if outcome == "comp_differential":
+        record = state.competition
+        table = pd.DataFrame({"date": record["date"].astype(str), "value": record["differential"]})
+        starts = pd.Series({day: pd.Timestamp(day) + pd.Timedelta(hours=COMPETITION_START_HOUR) for day in dict.fromkeys(table["date"])})
+    else:
+        stats = state.golf_stats
+        table = pd.DataFrame({"date": stats["date"].astype(str), "value": stats[column]})
+        local = stats["start_utc"].dt.tz_convert(state.config.timezone).dt.tz_localize(None)
+        starts = pd.Series(local.to_numpy(), index=stats["date"].astype(str)).groupby(level=0).first().map(pd.Timestamp)
+    results = round_result(table, detrend=detrend)
+    what = OUTCOMES[outcome][0].split(": ", 1)[1]
+    label = what[0].upper() + what[1:]
+    title = f"{label} compared with the trend" if detrend else label
     return results, starts, title
 
 
@@ -836,6 +940,138 @@ def health_training_sleep(state: AppState, period: str = "all") -> Dict:
         "groups": [{"key": key, "title": title, "nights": int(masks[key].sum())} for key, title in TRAINING_GROUPS],
         "rows": rows, "nights": int(len(nights)), "level": level,
     })
+
+
+# --- rounds: competition scores (certificates) and the full rounds of the Garmin app ------------------------
+
+# key -> (title, column of the record)
+COMPETITION_MEASURES = {
+    "gross": ("Strokes", "gross"),
+    "stableford": ("Stableford points", "stableford"),
+    "differential": ("Score differential", "differential"),
+    "hcp_new": ("Handicap index after the round", "hcp_new"),
+}
+SUMMARY_LAST_ROUNDS = 10
+SUMMARY_LAST_DAYS = 365
+ROUND_LIST_LIMIT = 40
+
+
+def rounds_overview(state: AppState) -> Dict:
+    """What the Rounds tab can show: the competition record and the Garmin rounds, with their measures and years."""
+    competition, golf = state.competition, state.golf_stats
+    return clean({
+        "competition": {
+            "loaded": competition is not None,
+            "rounds": int(len(competition)) if competition is not None else 0,
+            "derived": int(competition["gross_derived"].sum()) if competition is not None else 0,
+            "measures": [{"key": key, "title": title} for key, (title, _) in COMPETITION_MEASURES.items()],
+            "years": sorted({int(d[:4]) for d in competition["date"]}, reverse=True) if competition is not None else [],
+            "notes": state.competition_notes, "error": state.errors.get("competition", ""),
+        },
+        "garmin": {
+            "loaded": golf is not None,
+            "rounds": int(len(golf)) if golf is not None else 0,
+            "measures": [{"key": key, "title": title} for key, (title, _) in ROUND_MEASURES.items()],
+            "years": sorted({d.year for d in golf["date"]}, reverse=True) if golf is not None else [],
+        },
+        "days": list(PAIR_DAYS),
+    })
+
+
+def _round_series(state: AppState, source: str, measure: str):
+    """Date, value and 'derived' flag of every round of one source, oldest first."""
+    if source == "competition":
+        if state.competition is None:
+            raise ValueError("No competition rounds are loaded")
+        if measure not in COMPETITION_MEASURES:
+            raise ValueError(f"Unknown measure: {measure}")
+        title, column = COMPETITION_MEASURES[measure]
+        frame = state.competition
+        derived = frame["gross_derived"] if measure == "gross" else pd.Series(False, index=frame.index)
+        return title, frame["date"].astype(str), pd.to_numeric(frame[column], errors="coerce"), derived
+    if source == "garmin":
+        if state.golf_stats is None:
+            raise ValueError("No Garmin rounds are loaded")
+        if measure not in ROUND_MEASURES:
+            raise ValueError(f"Unknown measure: {measure}")
+        stats = state.golf_stats
+        return ROUND_MEASURES[measure][0], stats["date"].astype(str), pd.to_numeric(stats[measure], errors="coerce"), pd.Series(False, index=stats.index)
+    raise ValueError(f"Unknown source: {source}")
+
+
+def rounds_trend(state: AppState, source: str, measure: str, period: str = "all") -> Dict:
+    """One measure round by round with the average of the last 5 and the last 10 rounds."""
+    title, dates, values, derived = _round_series(state, source, measure)
+    means = rolling_by_round(values)
+    table = pd.DataFrame({"value": values.to_numpy(), "short": means["short"].to_numpy(), "long": means["long"].to_numpy(),
+                          "derived": derived.to_numpy(), "date": dates.to_numpy()}, index=pd.to_datetime(dates).dt.date)
+    table = _in_period(table, period)
+    shown = table.dropna(subset=["value"])
+    points = [{"date": row["date"], "value": row["value"], "short": row["short"], "long": row["long"], "derived": bool(row["derived"])}
+              for _, row in shown.iterrows()]
+    latest = {"short": shown["short"].iloc[-1], "long": shown["long"].iloc[-1], "all": shown["value"].mean()} if len(shown) else None
+    return clean({"title": title, "points": points, "latest": latest, "rounds": int(len(table)), "windows": [5, 10],
+                  "derived": int(shown["derived"].sum())})
+
+
+def rounds_competition_table(state: AppState, period: str = "all") -> Dict:
+    """The rounds of the record, newest first, with the Garmin statistics of the same day where there is a Garmin round."""
+    if state.competition is None:
+        raise ValueError("No competition rounds are loaded")
+    record = state.competition.copy()
+    record.index = pd.to_datetime(record["date"]).dt.date
+    record = _in_period(record, period)
+    garmin = {}
+    if state.golf_stats is not None:
+        for _, g in state.golf_stats.iterrows():
+            garmin.setdefault(str(g["date"]), g)
+    rows = []
+    for _, r in record.iloc[::-1].iterrows():
+        g = garmin.get(r["date"])
+        rows.append({
+            "date": r["date"], "club": r["club"], "par": r["par"], "slope": r["slope"], "rating": r["course_rating"],
+            "gross": r["gross"], "gross_derived": bool(r["gross_derived"]), "stableford": r["stableford"],
+            "differential": r["differential"], "hcp_new": r["hcp_new"], "pcc": r["pcc"],
+            "garmin": None if g is None else {"strokes": g["strokes"], "fir_pct": g["fir_pct"], "gir_pct": g["gir_pct"],
+                                              "putts_per_hole": g["putts_per_hole"], "penalty_strokes": g["penalty_strokes"]},
+        })
+    linked = sum(1 for row in rows if row["garmin"] is not None)
+    return clean({"rows": rows, "linked": linked, "garmin_loaded": state.golf_stats is not None})
+
+
+def rounds_garmin_summary(state: AppState) -> Dict:
+    """The statistics of the Garmin rounds: all rounds, the last 12 months and the last 10 rounds."""
+    if state.golf is None or state.golf_stats is None:
+        raise ValueError("No Garmin rounds are loaded")
+    rounds, holes, stats = state.golf.rounds, state.golf.holes, state.golf_stats
+    ids_all = list(stats["round_id"])
+    last_day = max(stats["date"])
+    since = pd.Timestamp(last_day) - pd.Timedelta(days=SUMMARY_LAST_DAYS)
+    ids_year = [i for i, d in zip(stats["round_id"], stats["date"]) if pd.Timestamp(d) > since]
+    ids_last = ids_all[-SUMMARY_LAST_ROUNDS:]
+    columns = [("all", "All rounds", ids_all), ("year", "Last 12 months", ids_year), ("last", f"Last {SUMMARY_LAST_ROUNDS} rounds", ids_last)]
+    results = {key: summarise(rounds, holes, ids) for key, _, ids in columns}
+    rows = [{"key": key, "title": title, "values": {c: (fmt.format(results[c][key]) if results[c][key] is not None and not pd.isna(results[c][key]) else None) for c, _, _ in columns}}
+            for key, title, fmt in SUMMARY_ROWS]
+    return clean({"columns": [{"key": key, "title": title, "rounds": len(ids)} for key, title, ids in columns], "rows": rows,
+                  "first": str(stats["date"].min()), "last": str(last_day)})
+
+
+def rounds_garmin_table(state: AppState, period: str = "all") -> Dict:
+    """The latest Garmin rounds, newest first."""
+    if state.golf_stats is None:
+        raise ValueError("No Garmin rounds are loaded")
+    stats = state.golf_stats.copy()
+    stats.index = pd.to_datetime(stats["date"]).dt.date
+    stats = _in_period(stats, period)
+    rows = []
+    for _, r in stats.iloc[::-1].head(ROUND_LIST_LIMIT).iterrows():
+        rows.append({
+            "date": str(r["date"]), "course": r["course"], "tee": r["tee"], "strokes": r["strokes"], "to_par": r["to_par"],
+            "differential": r["differential"], "fir_pct": r["fir_pct"], "gir_pct": r["gir_pct"],
+            "putts_per_hole": r["putts_per_hole"], "putts_18": r["putts_18"], "penalty_strokes": r["penalty_strokes"],
+        })
+    return clean({"rows": rows, "rounds": int(len(stats)), "limit": ROUND_LIST_LIMIT})
 
 
 # --- sessions -------------------------------------------------------------------------------------

@@ -4,7 +4,7 @@
 
 ```
 conda activate golf            # Python 3.13; Python >= 3.11 is needed (tomllib)
-python -m pytest               # about 270 tests, roughly a minute
+python -m pytest               # about 350 tests, roughly a minute
 ```
 
 `requirements.txt` lists the packages. The tests use made-up data in temporary folders and their own copy of the configuration, so they neither need your CSV files nor change your settings. A few extra checks run against your real data and are skipped when it is absent. The web server tests start a server on a free port.
@@ -26,6 +26,8 @@ golf/
     garmin.py             Garmin export: nights, overnight vitals, activities
     withings.py           Withings export: one row per weighing day (weight, body composition, BMI)
     competition.py        handicap certificate (PDF text) -> rounds; the permanent record of rounds (CSV)
+    fit.py                minimal Garmin FIT file reader
+    golfrounds.py         Garmin golf scorecards (JSON + FIT): full rounds and their holes
   stats/
     univariate.py         normal / skew-normal fit and ranges
     bivariate.py          joint lateral-carry model (Gaussian copula)
@@ -38,6 +40,7 @@ golf/
     correlation.py        Pearson r with Fisher z interval
     daily.py              one row per day of Garmin and Withings data, rolling means
     difference.py         Welch interval for the difference of two group means
+    rounds.py             statistics of golf rounds: score, fairways, greens, putting; averages over the last rounds
   report/
     cards.py              draws a card (matplotlib)
     build.py              chooses the shots, draws and saves the card
@@ -46,7 +49,7 @@ golf/
     api.py                one function per URL, user errors become ApiError
     server.py             small local web server (standard library)
     static/               index.html, app.js, app.css (Plotly is served from the installed package)
-tests/                    labels, columns, loading, statistics, cards, dashboard, stack, garmin, correlations, health, competition
+tests/                    labels, columns, loading, statistics, cards, dashboard, stack, garmin, correlations, health, competition, fit, golf rounds, rounds tab
 docs/                     this documentation
 Analysis_legacy/          the original scripts
 ```
@@ -74,6 +77,10 @@ The page talks to the server with JSON. Requests carry the current choices; noth
 | `/api/state` | GET | Folders, file and shot counts, notes about unselected clubs; `enabled` is false for a kind without a folder |
 | `/api/load` | POST | Set the data folders (`swing_dir`, `pitching_dir`, `stack_dir`, `garmin_dir`, `withings_dir`) and reload. An empty value turns that kind off; a key that is left out keeps its folder |
 | `/api/garmin/overview` | GET | Outcomes, clubs and predictors for the Health tab (internally still called `garmin`); says whether data and sessions suffice |
+| `/api/rounds/overview` | GET | Both kinds of round with their measures and years |
+| `/api/rounds/trend` | GET | One measure round by round with its averages (`source` competition or garmin, `measure`, `period`) |
+| `/api/rounds/competition` | GET | The competition record, newest first, with the Garmin statistics of the same day (`period`) |
+| `/api/rounds/garmin-summary`, `/api/rounds/garmin-rounds` | GET | The statistics of the Garmin rounds (all, last 12 months, last 10 rounds); the latest rounds |
 | `/api/health/trend` | GET | One measure over time with its short and long average (`measure`, `period`) |
 | `/api/health/training-sleep` | GET | Sleep on nights after strength training within 4 or 12 h before bed, against other nights (`period`) |
 | `/api/garmin/table`, `/api/garmin/scatter` | GET | Correlation per Garmin measure; the points and fit of one of them (`outcome`, `club`, `detrend` 1 or 0, and `predictor` for the scatter) |
@@ -111,7 +118,8 @@ The server listens on `127.0.0.1` only. Because any web page you have open could
 | Change the look of a card | constants at the top of `report/cards.py`, titles and notes in `golf.toml` |
 | Relate another watch measure to the practice results | add it to `PREDICTORS` and to `_garmin_row()` in `stats/context.py`; a scale measure goes into `BODY_PREDICTORS` and `_body_row()`; the Health tab picks it up |
 | Add a health measure (trends and the 'against each other' plot) | add it to `GARMIN_MEASURES` or `BODY_MEASURES` and to `daily_table()` in `stats/daily.py` |
-| Add a result to explain | add it to `OUTCOMES` in `dashboard/service.py` and write its per-session function in `stats/outcomes.py` |
+| Add a result to explain | add it to `OUTCOMES` in `dashboard/service.py` and write its per-session function in `stats/outcomes.py` (a round result: `ROUND_OUTCOME_COLUMN` and a column of `round_stats`) |
+| Add a statistic of the Garmin rounds | add the per-hole fact in `_holes_with_par()`, the per-round column in `round_stats()` and, for the overview, `summarise()` and `SUMMARY_ROWS` in `stats/rounds.py`; a chart measure goes into `ROUND_MEASURES` |
 | Change a threshold | `[stats]` in `golf.toml`, documented in `StatsSettings` in `config.py` |
 
 Write a test with the change. The dashboard tests build a small synthetic data set in `tests/test_dashboard.py` and are a good starting point.

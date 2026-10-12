@@ -72,6 +72,24 @@ def _per_club(swing: pd.DataFrame, column: str, statistic: str, detrend: bool, c
     return relative_to_usual(table, detrend=detrend)
 
 
+def round_result(rounds: pd.DataFrame, *, detrend: bool) -> pd.DataFrame:
+    """One number per day of play from round results (score differential, fairways hit, ...).
+
+    `rounds` has the columns date and value, one row per round. Rounds on the same day are averaged. With
+    `detrend` the value is the difference to the straight-line trend through the days played (in the unit of the
+    value); without it, the value itself. Returns the columns date, value and rounds (how many went into the day).
+    """
+    data = rounds.dropna(subset=["value"])
+    if data.empty:
+        return pd.DataFrame(columns=["date", "value", "rounds"])
+    days = data.groupby("date")["value"].agg(["mean", "size"]).reset_index()
+    days.columns = ["date", "value", "rounds"]
+    if detrend:
+        ordinal = pd.to_datetime(days["date"]).map(pd.Timestamp.toordinal).to_numpy(dtype=float)
+        days["value"] = days["value"].to_numpy() - _expected(ordinal, days["value"].to_numpy(), True)
+    return days
+
+
 def stack_speed(stack: pd.DataFrame, *, detrend: bool, reference_weight: Optional[float] = None) -> pd.DataFrame:
     """Stack speed of each session, expressed for one reference weight, in mph.
 

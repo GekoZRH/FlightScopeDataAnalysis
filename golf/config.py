@@ -26,7 +26,7 @@ BAG_MODES = ("swing", "pitching")      # the kinds that have a bag and a printed
 # Every data folder the dashboard knows. "garmin" and "withings" are not practice data: they are the health
 # data (watch, scale) that the Health tab shows and that the practice results are related to.
 HEALTH_KINDS = ("garmin", "withings")
-FOLDER_KINDS = MODES + HEALTH_KINDS
+FOLDER_KINDS = MODES + HEALTH_KINDS + ("competition",)         # competition: the handicap certificates and the record of rounds
 
 
 @dataclass(frozen=True)
@@ -109,6 +109,8 @@ class Config:
             return self.garmin_dir
         if mode == "withings":
             return self.withings_dir
+        if mode == "competition":
+            return self.competition_dir
         raise ValueError(f"Unknown kind of data {mode!r}, expected one of {FOLDER_KINDS}")
 
     def cards_dir(self, mode: str) -> Path:

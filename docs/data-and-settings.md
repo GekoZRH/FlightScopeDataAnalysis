@@ -47,6 +47,15 @@ What is read (everything else, which is a lot, is ignored):
 - A night appears once even if several files hold it. A session without a recorded night has no sleep values; it is simply left out of the comparisons that need them.
 - The export is large (it can hold years of data and be over 100 MB) but it is only read when you press Load data, and it never leaves your computer. `garmindata/` is ignored by git.
 
+## Garmin rounds (golf)
+
+The same Garmin export holds your golf scorecards in `DI_CONNECT/DI-GOLF`: `Golf-SCORECARD.json` has every round, with per hole the strokes, putts, where the tee shot went (fairway hit, left or right) and penalty strokes, and the tee (course rating, slope). Next to it is one raw file per round, `Golf-SCORECARD_RAWDATA-<round id>.fit`, with the course name and the par and stroke index of each hole, which the JSON does not have. Garmin does not document that file; the message numbers used (190 course, 193 hole) were read off your files and checked against the scorecards.
+
+- Only **full rounds of 18 holes** that count for your statistics are used (rounds with fewer holes, rounds excluded in the app and rounds in progress are skipped).
+- The date of a round is its local day (time zone from `[garmin] timezone`).
+- A hole without a recorded putt count, fairway outcome or penalty count keeps that gap. For the statistics a missing penalty count is taken as no penalty. A round whose raw file is missing or unreadable has no par: its score statistics still work, but not those that need par (greens in regulation, scrambling, strokes compared with par).
+- No separate folder is needed: the Garmin data folder is used. An export without golf data simply gives no Rounds from the Garmin app.
+
 ## Withings export
 
 In the Withings Health Mate app or on the Withings website you can request an export of your data (*Data export*). Unzip it into a folder, for example `withingsdata`, and choose that folder in the dashboard. Only two files are read:

@@ -16,7 +16,39 @@ from test_stack import write_stack
 DAYS = [date(2026, 3, 2) + timedelta(days=4 * k) for k in range(14)]
 
 
-def build_world(tmp_path, *, sleep_hours, speed_for, garmin=True, stack=False, strength_days=(), weighings=None, deep_for=None, training=None):
+GOLF_PARS = [4, 5, 3, 4, 4, 3, 5, 4, 4, 4, 3, 5, 4, 4, 3, 4, 5, 4]            # par 72
+
+
+def write_golf(garmin_folder, strokes_for):
+    """A full round at 10:00 local on each of DAYS: strokes_for(k) strokes in total (bogeys on the first holes), two putts a hole."""
+    import fitbuild
+    golf = garmin_folder / "DI_CONNECT" / "DI-GOLF"
+    golf.mkdir(parents=True)
+    cards = []
+    for k, day in enumerate(DAYS):
+        extra = int(strokes_for(k)) - sum(GOLF_PARS)
+        holes = [{"number": n, "strokes": par + (1 if n <= extra else 0), "putts": 2, "fairwayShotOutcome": "HIT" if par > 3 else None,
+                  "pinPositionLat": 1, "pinPositionLon": 2} for n, par in enumerate(GOLF_PARS, start=1)]
+        cards.append({"id": 1000 + k, "courseGlobalId": 28390, "startTime": f"{day.isoformat()}T08:00:00Z", "holesCompleted": 18, "roundType": "ALL",
+                      "inProgress": False, "excludeFromStats": False, "teeBox": "Weiss", "teeBoxRating": 72.0, "teeBoxSlope": 113,
+                      "strokes": sum(h["strokes"] for h in holes), "holes": holes})
+        (golf / f"Golf-SCORECARD_RAWDATA-{1000 + k}.fit").write_bytes(fitbuild.golf_fit("Golf Beispiel", list(zip(GOLF_PARS, range(1, 19)))))
+    (golf / "Golf-SCORECARD.json").write_text(json.dumps({"version": "v1", "type": "SCORECARD", "data": cards}), encoding="utf-8")
+
+
+def write_competition(folder, rounds):
+    """The record of competition rounds, as `python -m golf rounds` writes it. rounds: (date, gross, differential) triples."""
+    import pandas as pd
+    from golf.data.competition import RECORD_COLUMNS, RECORD_NAME
+    folder.mkdir()
+    rows = [{"date": day.isoformat(), "club": "Golf Beispiel", "type": "Competition", "par": 72, "slope": 113, "course_rating": 72.0,
+             "hcp_old": 5.0, "hcp_new": 5.0 - 0.1 * i, "stableford": 30, "gross": gross, "gross_derived": False, "pcc": 0, "adjustment": 0.0,
+             "differential": diff, "same_day": 1, "first_seen": "2026-09-26", "last_seen": "2026-09-26", "source": "x.pdf"}
+            for i, (day, gross, diff) in enumerate(rounds)]
+    pd.DataFrame(rows, columns=RECORD_COLUMNS).to_csv(folder / RECORD_NAME, index=False, encoding="utf-8")
+
+
+def build_world(tmp_path, *, sleep_hours, speed_for, garmin=True, stack=False, strength_days=(), weighings=None, deep_for=None, training=None, golf_strokes=None, competition=None):
     """Practice at 10:00 local on DAYS. The night before each session lasts sleep_hours[k]; speed_for(k) is the 7-iron speed."""
     swing = tmp_path / "swing"
     swing.mkdir()
@@ -54,6 +86,11 @@ def build_world(tmp_path, *, sleep_hours, speed_for, garmin=True, stack=False, s
             acts.append(activity("strength_training", bed - timedelta(hours=hours + 1), 60, load=15.0))
         (fitness / "x_1_summarizedActivities.json").write_text(json.dumps([{"summarizedActivitiesExport": acts}]), encoding="utf-8")
 
+    if golf_strokes:
+        write_golf(tmp_path / "garmindata", golf_strokes)
+    if competition:
+        write_competition(tmp_path / "CompetitionResults", competition)
+
     if weighings:
         scale = tmp_path / "withingsdata"
         scale.mkdir()
@@ -65,7 +102,7 @@ def build_world(tmp_path, *, sleep_hours, speed_for, garmin=True, stack=False, s
     text = DEFAULT_CONFIG.read_text(encoding="utf-8")
     for key, value in (("swing_dir", "swing"), ("pitching_dir", ""), ("stack_dir", "stack" if stack else ""),
                        ("garmin_dir", "garmindata" if garmin else ""), ("withings_dir", "withingsdata" if weighings else ""),
-                       ("output_dir", "out")):
+                       ("competition_dir", "CompetitionResults" if competition else ""), ("output_dir", "out")):
         text = re.sub(rf'{key} = ".*"', f'{key} = "{value}"', text)
     (tmp_path / "golf.toml").write_text(text, encoding="utf-8")
     return tmp_path / "golf.toml"

@@ -15,13 +15,13 @@ The dashboard opens in your browser at `http://127.0.0.1:8765/`. It only listens
 
 ## The page
 
-At the top are the data folders (full swing, pitching, stack, Garmin and Withings), then the tabs: **Sessions**, **Full swing**, **Pitching**, **Stack** and **Health** on the left and **Bag** and **Wedge intents** on the right. The page opens on the first tab that has data, normally Full swing.
+At the top are the data folders (full swing, pitching, stack, Garmin, Withings and competition results), then the tabs: **Sessions**, **Full swing**, **Pitching**, **Stack**, **Rounds** and **Health** on the left and **Bag** and **Wedge intents** on the right. The page opens on the first tab that has data, normally Full swing.
 
 ### Data folders
 
-Type the folder with your full swing CSV exports, the folder with your pitching CSV exports, the folder with your stack CSV exports, the folder with your Garmin export and the folder with your Withings export, or press **Browse** to pick them in the Windows folder dialog (it can open behind the browser window). Press **Load data** to read them. Below the buttons you see how many files, shots and sessions were found, and the last session.
+Type the folder with your full swing CSV exports, the folder with your pitching CSV exports, the folder with your stack CSV exports, the folder with your Garmin export, the folder with your Withings export and the folder with your handicap certificate (competition results), or press **Browse** to pick them in the Windows folder dialog (it can open behind the browser window). Press **Load data** to read them. Below the buttons you see how many files, shots and sessions were found, and the last session.
 
-**You do not need all of them.** Leave a folder empty if you have no data of that kind: that kind is then not used, its tabs are not shown, and nothing else is affected. If all folders are empty the page says so. Garmin or Withings data alone is enough: you then get the Health tab only. Fill a folder in again and press Load data to bring the kind back.
+**You do not need all of them.** Leave a folder empty if you have no data of that kind: that kind is then not used, its tabs are not shown, and nothing else is affected. If all folders are empty the page says so. Garmin or Withings data alone is enough: you then get the Health tab only, and competition results alone give the Rounds tab only. Fill a folder in again and press Load data to bring the kind back.
 
 - For full swing and pitching only the CSV files directly in the folder are read. To keep old exports out of the analysis, move them into a subfolder (for example `legacy data`).
 - For stack data, the CSV files directly in the folder and in the folders one level below it are read, because the training app saves one folder per session. To keep a stack session out, untick it on the Sessions tab.
@@ -80,6 +80,16 @@ A `*` after a name in the straightness plot and the distance table means there a
 Progress of your stack training: club head speed per session, **one line per weight**. Each point is the average speed of all swings with that weight in that session. Heavy weights are red and light weights blue. The x-axis shows every ticked stack session; a weight that was not used in a session has no point there and its line continues across. Click a weight in the legend to hide or show its line, and hover a point for the number of swings and the 95% interval.
 
 The weight is read from the `Club` column of the file (`235g` is 235 grams). Swings with a `Club` value that is not a weight are listed in an orange note and left out of the lines.
+
+### Rounds tab
+
+Your scores, from two sources. The tab needs the competition folder, the Garmin export, or both.
+
+**Competition scores.** One row per round on your handicap certificate. When you press **Load data**, every PDF in the competition folder is read and its rounds are added to the record `competition_rounds.csv` in the same folder (see [Data and settings](data-and-settings.md)). Rounds that have dropped off the certificate stay in the record, so replace the PDF whenever there is a new one and press Load data. The chart shows one measure round by round: strokes, Stableford points, score differential or your handicap index after the round, with the average of the last 5 rounds (thin line) and the last 10 rounds (bold line). Choose the period like in the Health tab. An open circle is a number that was calculated and not read from the certificate. The table below lists every round of the period. If a Garmin round was recorded on the same day, its fairways, greens in regulation, putts and penalties are shown at the end of the row.
+
+**Rounds from the Garmin app.** Only full rounds of 18 holes are used. The chart works like the one above, for these measures: strokes, strokes compared with par, score differential, fairways hit %, greens in regulation %, putts per hole, putts per round, three-putts %, scrambling % and penalty strokes. A round is left out of a statistic when too few of its holes have the data it needs (the app does not record every putt or fairway). **Statistics of the Garmin rounds** compares all rounds, the last 12 months and the last 10 rounds in one table, and **Latest Garmin rounds** lists the newest ones.
+
+To see whether sleep, training or weight go with your scores, choose one of the round results (*Competition rounds: score differential*, *Garmin rounds: score differential, fairways hit, greens in regulation or putts per hole*) in the Health tab. A competition round has no start time on the certificate, so it is taken to start at 9:00.
 
 ### Health tab
 

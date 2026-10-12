@@ -96,6 +96,28 @@ The optional **fit line** is an ordinary least-squares line through all plotted 
 
 **Training before bed against sleep.** The nights are split into three groups: no strength training ended in the 12 hours before sleep started, a session ended 4 to 12 hours before, or one ended within 4 hours before (a night in the third group is not in the second). For each sleep measure the difference of each training group against the no-training group is calculated with **Welch's t interval** (it does not assume both groups vary equally). A group needs at least 3 nights with a value. As with the correlations, many measures are tried (16 differences), so about one in twenty will look clear by chance; the note counts how many to expect. Days with training differ from days without in other ways (weekday, how you feel, what you ate), so a clear difference is a hint and not proof that the training caused it.
 
+## Rounds
+
+**Score differential** is (strokes - course rating) x 113 / slope, the number the handicap system compares, so rounds on different courses and tees are comparable. It is calculated for the Garmin rounds from the tee box rating and slope in the scorecard; for competition rounds it is the value on the certificate.
+
+**Competition certificate.** The certificate gives, per round, two score columns that are not filled the same way for every round: Stableford points and strokes (in either order), or the differential and one of them. They are told apart by size (60 or more is strokes; a number with a decimal point is the differential). A round whose strokes are not listed gets them from the differential, the course rating, the slope and the PCC (strokes = differential x slope / 113 + rating + PCC, rounded), and is marked as calculated. Strokes and differential are compared, and a difference of more than 0.15 is reported.
+
+**Statistics of the Garmin rounds.** Each one is calculated over the holes that have the data:
+
+| Statistic | Definition |
+|---|---|
+| Fairways hit | tee shots on par 4 and par 5 holes that have an outcome; the share that is HIT (left and right are the misses) |
+| Green in regulation | strokes minus putts at most par minus 2, for holes with a putt count. Penalty strokes count as strokes, so a hole with a penalty is judged more strictly than the official definition |
+| Scrambling | of the holes without a green in regulation, the share finished in par or better |
+| Putts per hole, per 18 holes | the average over holes with a putt count; 'per 18 holes' is that times 18. The putts of one round are only given when all 18 holes have a count |
+| Three putts or more | share of holes with a putt count that took three putts or more |
+| Penalty strokes | the sum; a hole without a penalty count is taken as having none |
+| Par 3, 4, 5 | average strokes compared with par on holes of that par |
+
+In the overview table a percentage is calculated over all holes of the rounds (a round with more holes recorded counts more), not as the average of the per-round percentages. For a single round a percentage is only shown when enough holes have the data: 6 fairway tee shots, 9 holes with putts, 4 missed greens (scrambling). The averages in the charts are over the last 5 and last 10 rounds that have a value (3 and 5 are needed).
+
+**Scores against sleep and the other health measures.** The round results are used like the practice results of the Health tab: one value per day played (rounds on the same day are averaged), with the straight-line trend through the days removed by default, and correlated with what the watch and the scale recorded before the round. See the notes on the correlation above; with 100 or so Garmin rounds the intervals are much narrower than with the 25 competition rounds.
+
 ## Settings that change the numbers
 
 | Setting | Effect |
