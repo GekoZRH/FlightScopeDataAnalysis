@@ -58,6 +58,20 @@ In the Withings Health Mate app or on the Withings website you can request an ex
 
 The other files (account, devices, ECG, `other.csv`, which only repeats the same values as whole-number percentages) are not read. When there are several weighings on a day, the first of the day is used. Body fat % is calculated from fat mass and weight, so it has decimals. The times in the file are taken as they are; only the date matters. `withingsdata/` is ignored by git.
 
+## Competition rounds (handicap certificates)
+
+The golf federation's website only gives you a **Handicap Certificate** as a PDF, and it lists only your latest rounds: when new rounds come in, old ones drop off the end. So the rounds are copied into a **record file** that grows over time.
+
+1. Save the certificate PDF in the folder `CompetitionResults` (`competition_dir` in `golf.toml`). A new PDF with the same file name just replaces the old one.
+2. Run `python -m golf rounds`. Every PDF in the folder is read, oldest certificate first, and the rounds are written to `CompetitionResults/competition_rounds.csv`.
+
+- A round that is new is added. A round that is still on the certificate is refreshed (not duplicated). **A round that is no longer on the certificate stays in the record, unchanged.**
+- A round is recognised by its date, club, par, slope, course rating and, for two identical entries on one day, their order (`same_day`). So the record does not depend on the file name or on the row numbers of the certificate.
+- Columns: `date`, `club`, `type`, `par`, `slope`, `course_rating`, `hcp_old`, `hcp_new` (handicap index before and after), `stableford`, `gross` (strokes), `gross_derived`, `pcc`, `adjustment`, `differential`, `same_day`, `first_seen`, `last_seen` (the dates of the certificates that listed the round) and `source` (the PDF it last came from).
+- On the certificate the two score columns are not filled the same way for every round: they hold Stableford points and strokes (in either order), or the differential and one of them. They are told apart by size (60 or more is strokes). If the strokes are missing, they are calculated from the differential, the course rating, the slope and the PCC, and `gross_derived` is `True`. Strokes and differential are checked against each other, and a mismatch is printed.
+- A row that cannot be read is printed and is **not** put in the record. Nothing is dropped silently.
+- Reading a PDF needs the `pypdf` package (`pip install pypdf`). The folder and the record are ignored by git, because the certificate holds your name and national ID.
+
 ## How club names are read
 
 The `Club` text is split into **club**, **variant** and **intent**.
@@ -99,7 +113,7 @@ The file is in the project folder and is committed to git. Relative paths are re
 
 | Section | Setting | Meaning |
 |---|---|---|
-| `[paths]` | `swing_dir`, `pitching_dir`, `stack_dir`, `garmin_dir`, `withings_dir` | Data folders used until you choose others in the dashboard. An empty value (`""`) means: no data of that kind |
+| `[paths]` | `swing_dir`, `pitching_dir`, `stack_dir`, `garmin_dir`, `withings_dir`, `competition_dir` | Data folders used until you choose others in the dashboard. An empty value (`""`) means: no data of that kind |
 | `[garmin]` | `timezone` | Your local time zone, to turn Garmin's UTC times into local times (default `Europe/Zurich`) |
 | | `output_dir` | Where cards are written (default `Output`) |
 | `[stats]` | `window_weeks`, `fallback_weeks` | The two "Last N weeks" quick buttons on the Sessions tab (4 and 12) |

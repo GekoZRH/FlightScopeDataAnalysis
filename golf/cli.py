@@ -2,6 +2,7 @@
 
     python -m golf cards        write the printed distance cards
     python -m golf dashboard    open the dashboard in the browser
+    python -m golf rounds       copy the rounds of the handicap certificates (PDF) into the record file
 """
 
 from __future__ import annotations
@@ -43,6 +44,26 @@ def build_cards(as_of: Optional[date] = None, config_path: Optional[Path] = None
     return written
 
 
+def update_rounds(config_path: Optional[Path] = None) -> int:
+    """Read the handicap certificates and update the record of competition rounds. Returns the number of rounds."""
+    from golf.data.competition import RECORD_NAME, update_record
+
+    config = load_config(config_path)
+    if config.competition_dir is None:
+        print("No competition folder chosen (competition_dir in golf.toml).")
+        return 0
+    report = update_record(config.competition_dir)
+    for item in report.certificates:
+        print(f"{item['file']} (certificate of {item['date']}): {item['rounds']} rounds, {item['added']} new, {item['refreshed']} already in the record")
+    print(f"Record: {report.rounds} rounds in {config.competition_dir / RECORD_NAME}"
+          + (f", {report.kept} of them no longer on the latest certificate (kept)" if report.kept else ""))
+    for text in report.warnings:
+        print(f"  check: {text}")
+    for text in report.unread:
+        print(f"  could not read this row, it is NOT in the record: {text}")
+    return report.rounds
+
+
 def report_problems(mode: str, shots, config) -> None:
     unreadable = unparsed_labels(shots)
     if not unreadable.empty:
@@ -67,9 +88,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     dash.add_argument("--no-browser", action="store_true", help="do not open the browser automatically")
     dash.add_argument("--config", type=Path, help="path to golf.toml")
 
+    rounds = sub.add_parser("rounds", help="copy the rounds of the handicap certificates (PDF) into the record file")
+    rounds.add_argument("--config", type=Path, help="path to golf.toml")
+
     args = parser.parse_args(argv)
     if args.command == "cards":
         build_cards(args.as_of, args.config)
+    elif args.command == "rounds":
+        update_rounds(args.config)
     elif args.command == "dashboard":
         from golf.dashboard.server import serve
 

@@ -6,3 +6,4 @@ matplotlib>=3.9
 plotly>=6.0
 pytest>=8.0
 tzdata>=2024.1      # time zones on Windows
+pypdf>=5.0          # reading the handicap certificates (PDF)

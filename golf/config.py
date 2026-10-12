@@ -91,6 +91,7 @@ class Config:
     stack_dir: Optional[Path] = None
     garmin_dir: Optional[Path] = None
     withings_dir: Optional[Path] = None
+    competition_dir: Optional[Path] = None      # the handicap certificates (PDF) and the record of rounds made from them
     timezone: str = "Europe/Zurich"     # where the practice took place, to line it up with the watch (which uses UTC)
     default_bag: Dict[str, BagSpec] = field(default_factory=dict)   # golf.toml, before local choices
     excluded_sessions: Dict[str, frozenset] = field(default_factory=dict)   # mode -> session dates left out
@@ -195,6 +196,7 @@ def load_config(path: Optional[Path] = None, local_path: Optional[Path] = None) 
     stack_dir = _folder(root, local.get("stack_dir", paths.get("stack_dir")))
     garmin_dir = _folder(root, local.get("garmin_dir", paths.get("garmin_dir")))
     withings_dir = _folder(root, local.get("withings_dir", paths.get("withings_dir")))
+    competition_dir = _folder(root, local.get("competition_dir", paths.get("competition_dir")))
     # Sessions left out are remembered per data folder, so another folder starts with all sessions.
     excluded = {
         mode: frozenset(local.get("sessions", {}).get(mode, {}).get(str(folder), {}).get("excluded", []))
@@ -209,6 +211,7 @@ def load_config(path: Optional[Path] = None, local_path: Optional[Path] = None) 
         stack_dir=stack_dir,
         garmin_dir=garmin_dir,
         withings_dir=withings_dir,
+        competition_dir=competition_dir,
         timezone=str(raw.get("garmin", {}).get("timezone", "Europe/Zurich")),
         output_dir=root / paths["output_dir"],
         label_aliases=dict(aliases.get("label", {})),

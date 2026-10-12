@@ -44,6 +44,7 @@ After a practice session:
 | `golf.local.json` | Your own choices from the dashboard (folders, sessions, bag). Created automatically, not committed |
 | `SwingData/`, `PitchingData/`, `stackdata/` | Your exported sessions (the folders can be anywhere; these are the defaults). Not committed |
 | `garmindata/`, `withingsdata/` | Your Garmin and Withings data exports (optional). Not committed |
+| `CompetitionResults/` | Your handicap certificates (PDF) and the record of competition rounds made from them (`python -m golf rounds`). Not committed |
 | `Output/` | Generated cards. Not committed |
 | `Analysis_legacy/` | The original scripts, kept for comparison until the new code is trusted |
 

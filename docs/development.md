@@ -25,6 +25,7 @@ golf/
     stack.py              stack sessions: the weight is read from the Club column
     garmin.py             Garmin export: nights, overnight vitals, activities
     withings.py           Withings export: one row per weighing day (weight, body composition, BMI)
+    competition.py        handicap certificate (PDF text) -> rounds; the permanent record of rounds (CSV)
   stats/
     univariate.py         normal / skew-normal fit and ranges
     bivariate.py          joint lateral-carry model (Gaussian copula)
@@ -45,7 +46,7 @@ golf/
     api.py                one function per URL, user errors become ApiError
     server.py             small local web server (standard library)
     static/               index.html, app.js, app.css (Plotly is served from the installed package)
-tests/                    labels, columns, loading, statistics, cards, dashboard, stack, garmin, correlations
+tests/                    labels, columns, loading, statistics, cards, dashboard, stack, garmin, correlations, health, competition
 docs/                     this documentation
 Analysis_legacy/          the original scripts
 ```
@@ -117,7 +118,7 @@ Write a test with the change. The dashboard tests build a small synthetic data s
 
 ## Git
 
-- Personal data never goes into git: `*.csv`, `SwingData/`, `PitchingData/`, `stackdata/`, `garmindata/`, `withingsdata/`, `Plot/`, `Output/` and `golf.local.json` are ignored. If you really need a CSV in the repository (for example a small test file), add it with `git add -f`.
+- Personal data never goes into git: `*.csv`, `SwingData/`, `PitchingData/`, `stackdata/`, `garmindata/`, `withingsdata/`, `CompetitionResults/`, `Plot/`, `Output/` and `golf.local.json` are ignored. If you really need a CSV in the repository (for example a small test file), add it with `git add -f`.
 - `.gitattributes` keeps text files with the same line endings in the repository whatever the machine.
 - Local branches only so far; nothing has been pushed.
 
