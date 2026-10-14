@@ -674,7 +674,8 @@ def stack_progress(state: AppState) -> Dict:
     """Club head speed per session, one series per weight.
 
     `dates` lists every selected session; a weight has a point only in the sessions in which it was used.
-    Each point is the average speed of all swings with that weight in the session, with its 95% interval.
+    Each point is the average speed of all swings with that weight in the session, with its 95% interval,
+    and `max` is the fastest swing with that weight in the session.
     """
     shots = state.included("stack")
     if shots is None:
@@ -682,12 +683,14 @@ def stack_progress(state: AppState) -> Dict:
     usable = shots.dropna(subset=["weight_g", "club_speed_mph"])
     dates = sorted({str(d) for d in usable["session_date"]})
     summary = session_summary(usable, "club_speed_mph", by=["weight_g"], level=state.config.stats.ci_level)
+    fastest = {(str(s), float(w)): float(v) for (s, w), v in usable.groupby(["session_date", "weight_g"])["club_speed_mph"].max().items()}
     series = []
     for weight, group in summary.groupby("weight_g"):
         points = {str(row["session_date"]): row for _, row in group.iterrows()}
         series.append({
             "weight": float(weight), "name": f"{weight:g} g",
             "y": [points[d]["mean"] if d in points else None for d in dates],
+            "max": [fastest[(d, float(weight))] if d in points else None for d in dates],
             "lo": [points[d]["mean_lo"] if d in points else None for d in dates],
             "hi": [points[d]["mean_hi"] if d in points else None for d in dates],
             "n": [int(points[d]["n"]) if d in points else None for d in dates],

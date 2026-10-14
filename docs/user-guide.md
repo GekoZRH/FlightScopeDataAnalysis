@@ -77,7 +77,7 @@ A `*` after a name in the straightness plot and the distance table means there a
 
 ### Stack tab
 
-Progress of your stack training: club head speed per session, **one line per weight**. Each point is the average speed of all swings with that weight in that session. Heavy weights are red and light weights blue. The x-axis shows every ticked stack session; a weight that was not used in a session has no point there and its line continues across. Click a weight in the legend to hide or show its line, and hover a point for the number of swings and the 95% interval.
+Progress of your stack training: club head speed per session, **two lines per weight**: the average speed of all swings with that weight in that session (solid line, filled markers) and the fastest single swing (dashed line, open markers of the same shape). The two tick boxes **Average** and **Fastest swing** show or hide each kind. Heavy weights are red and light weights blue. The x-axis shows every ticked stack session; a weight that was not used in a session has no point there and its line continues across. Click a weight in the legend to hide or show both of its lines, and hover a point for the number of swings and, for the average, the 95% interval.
 
 The weight is read from the `Club` column of the file (`235g` is 235 grams). Swings with a `Club` value that is not a weight are listed in an orange note and left out of the lines.
 

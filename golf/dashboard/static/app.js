@@ -99,9 +99,10 @@ function sessionChart(id, dates, series, { title, band = false, height }) {
     }
     traces.push({
       x: dates, y: s.y, name: s.name, mode: "lines+markers", connectgaps: true,
-      line: { color: s.color, width: 2 }, marker: { size: s.size || 7, color: s.color, symbol: s.symbol || "circle" },
+      line: { color: s.color, width: 2, dash: s.dash || "solid" }, marker: { size: s.size || 7, color: s.color, symbol: s.symbol || "circle" },
+      legendgroup: s.group, showlegend: s.legend !== false,
       customdata: dates.map((_, i) => [s.n ? s.n[i] : null, s.lo ? s.lo[i] : null, s.hi ? s.hi[i] : null]),
-      hovertemplate: "%{y:.1f}   n=%{customdata[0]}   95%: %{customdata[1]:.1f} to %{customdata[2]:.1f}<extra>" + s.name + "</extra>",
+      hovertemplate: (s.hover || "%{y:.1f}   n=%{customdata[0]}   95%: %{customdata[1]:.1f} to %{customdata[2]:.1f}") + "<extra>" + s.name + "</extra>",
     });
   });
   if (height) $(id).style.height = height + "px";
@@ -508,10 +509,18 @@ async function loadStack() {
   }
   const weights = d.series.map((s) => s.weight);
   const lightest = Math.min(...weights), heaviest = Math.max(...weights);
-  const series = d.series.map((s, i) => ({
-    name: s.name, color: weightColor(s.weight, lightest, heaviest), y: s.y, lo: s.lo, hi: s.hi, n: s.n,
-    symbol: MARKER_SYMBOLS[i % MARKER_SYMBOLS.length], size: 10,
-  }));
+  // per weight: the average as a solid line with filled markers, the fastest swing as a dashed line with open markers of the same shape
+  const series = [];
+  d.series.forEach((s, i) => {
+    const color = weightColor(s.weight, lightest, heaviest), symbol = MARKER_SYMBOLS[i % MARKER_SYMBOLS.length];
+    if ($("st-avg").checked) {
+      series.push({ name: s.name, group: s.name, color, y: s.y, lo: s.lo, hi: s.hi, n: s.n, symbol, size: 10 });
+    }
+    if ($("st-max").checked) {
+      series.push({ name: `${s.name} max`, group: s.name, legend: !$("st-avg").checked, color, y: s.max, n: s.n, symbol: symbol + "-open", size: 10, dash: "dash",
+        hover: "fastest swing %{y:.1f}   of n=%{customdata[0]}" });
+    }
+  });
   sessionChart("stack-progress", d.dates, series, { title: "Club head speed (mph)", band: false, height: 460 });
 }
 
@@ -929,6 +938,7 @@ function wire() {
   $("browse-competition").addEventListener("click", guard(() => browse("competition")));
   wireRoundSelection("competition", "rc-table");
   wireRoundSelection("garmin", "rl-table");
+  for (const id of ["st-avg", "st-max"]) $(id).addEventListener("change", guard(loadStack));
   for (const id of ["rc-measure", "rc-period"]) $(id).addEventListener("change", guard(competitionRounds));
   for (const id of ["rg-measure", "rg-period"]) $(id).addEventListener("change", guard(garminRounds));
   for (const id of ["gm-outcome", "gm-club", "gm-detrend"]) $(id).addEventListener("change", guard(garminRefresh));

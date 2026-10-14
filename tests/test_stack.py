@@ -179,6 +179,20 @@ def test_stack_progress_has_one_line_per_weight(world):
     assert all(lo < y < hi for y, lo, hi in zip(heavy["y"], heavy["lo"], heavy["hi"]))
 
 
+def test_the_fastest_swing_of_each_weight_and_session_is_given(world):
+    progress = call(AppState(world), "/api/stack/progress")
+    for series in progress["series"]:
+        assert all(m is not None and m >= y for m, y in zip(series["max"], series["y"]))          # never below the average
+    heavy = progress["series"][0]
+    assert heavy["max"][0] > heavy["y"][0]                                                         # the swings of a set differ, so the fastest is above the average
+
+
+def test_the_fastest_swing_is_exactly_the_maximum_and_gaps_stay_gaps(world):
+    write_stack(world.parent / "stack" / "extra.csv", date(2026, 10, 20), [("255g", [86.0, 87.0, 91.5, 87.5])])
+    top = call(AppState(world), "/api/stack/progress")["series"][0]
+    assert top["name"] == "255 g" and top["max"][:4] == [None] * 4 and top["max"][4] == 91.5
+
+
 def test_a_weight_used_in_some_sessions_only_has_gaps(world, tmp_path):
     write_stack(world.parent / "stack" / "extra.csv", date(2026, 10, 20), [("255g", [86.0, 87.0, 88.0, 87.5])])
     state = AppState(world)

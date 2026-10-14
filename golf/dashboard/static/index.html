@@ -264,10 +264,14 @@
     <div class="card">
       <div class="row between">
         <h2>Progress</h2>
-        <span class="muted small">Click a weight in the legend to hide or show its line</span>
+        <div class="controls">
+          <label><input type="checkbox" id="st-avg" checked> Average</label>
+          <label><input type="checkbox" id="st-max" checked> Fastest swing</label>
+          <span class="muted small">Click a weight in the legend to hide or show its lines</span>
+        </div>
       </div>
       <div id="stack-progress" class="plot tall"></div>
-      <p class="muted small">Average club head speed of all swings with that weight in each selected session. A weight has a point only in the sessions in which it was used, and its line continues across the others. Heavy weights are red, light weights blue, and every weight has its own marker shape. Hover a point for the number of swings and the 95% interval.</p>
+      <p class="muted small">Per weight and selected session: the average club head speed of all swings (solid line, filled markers) and the fastest swing (dashed line, open markers). A weight has a point only in the sessions in which it was used, and its lines continue across the others. Heavy weights are red, light weights blue, and every weight has its own marker shape. Hover a point for the number of swings and, for the average, the 95% interval.</p>
     </div>
   </section>
 
