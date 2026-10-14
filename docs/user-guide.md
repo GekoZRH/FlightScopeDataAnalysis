@@ -60,6 +60,15 @@ The shaded band is the 95% interval of each point (see [Statistics](statistics.m
 
 **Dispersion against earlier sessions.** Choose a club, a session and what to compare with. The plot shows where the shots of that session landed (lateral against carry) over the earlier shots, with the area holding the middle 68% of shots (solid) and 95% (dotted for this session, dashed for the earlier shots). Faint rings are the earlier sessions one by one. The table gives the carry and lateral spread now and before, and the labels "tighter", "similar" or "broader" say whether the difference is larger than normal shot-to-shot variation. "Similar" is the usual answer with a few shots; it does not prove nothing changed.
 
+**What limits your distance?** Choose a club and see which factors go with its carry in your own shots. For each factor the chart gives the metres of carry that **one standard deviation more of it** is worth (the other factors held at their usual level), with its 95% interval and your average. A bar to the right means more of the factor adds carry, a bar to the left means less of it does, and a bar that crosses zero means the data cannot tell. Two views:
+
+- **What the ball does:** club head speed (for comparison, not something you are working on), **smash factor** (how well the club head speed is passed on: strike quality), **launch angle** and **spin rate**. These decide the carry directly, so they explain most of it (80 to 95% for your clubs).
+- **What the club does:** club head speed (for comparison), **attack angle**, **dynamic loft**, **club path** and **face to path**. These are the delivery numbers you can change. Their effect runs through the ball flight, so they explain less of the carry (15 to 50%), because the strike location, which would explain more, is only recorded for a few shots.
+
+A sentence above each chart names the largest clear lever. **Levers across the bag** shows the same numbers for every club in two tables (blue: more adds carry, orange: less adds carry, **bold**: clear), so you see the pattern of the whole bag at a glance.
+
+How to read it: an effect is estimated near your usual values. Where a factor has no clear effect it either does not matter for that club or is already near its best value. It is an association within your shots and not an experiment, so use a clear bar as a pointer to try on the range. For club path and face to path a negative number is left. More carry is not the goal for every club: for wedges a repeatable distance matters more. A club needs at least 30 shots from 4 selected sessions with all the factors recorded.
+
 **Printed card.** See "Printed cards".
 
 ### Pitching tab

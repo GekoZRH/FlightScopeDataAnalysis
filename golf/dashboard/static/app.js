@@ -213,8 +213,9 @@ async function loadSwing() {
   fillSelect($("sw-disp-session"), o.sessions, o.sessions.map(dateLabel));
   fillSelect($("sw-club"), o.labels);
   fillSelect($("sw-disp-club"), o.labels);
+  fillSelect($("lv-club"), o.labels);
   fillMeasureMenu($("sw-metric"), o.measures);
-  await Promise.all([swingReview(), swingProgress(), swingDispersion()]);
+  await Promise.all([swingReview(), swingProgress(), swingDispersion(), swingLevers(), swingLeverBag()]);
 }
 
 function fillMeasureMenu(select, measures, fallback) {
@@ -483,6 +484,80 @@ function sessionPreset(mode, preset) {
     const n = Math.max(1, parseInt($(`ss-${mode}-n`).value, 10) || 1);
     const newest = new Set(rows.slice(0, n).map((r) => r.date));
     applySelection(mode, (r) => newest.has(r.date));
+  }
+}
+
+// ---------------------------------------------------------------- distance levers
+
+const LEVER_DECIMALS = { smash: 3, club_speed_mph: 1, launch_v_deg: 1, spin_rpm: 0, aoa_deg: 1, dynamic_loft_deg: 1, club_path_deg: 1, ftp_deg: 1 };
+const leverNumber = (key, value) => (value == null ? "–" : Number(value).toFixed(LEVER_DECIMALS[key] ?? 1));
+const leverName = (f) => f.title.split(" (")[0];
+const leverUnit = (f) => (f.unit ? ` ${f.unit}` : "");
+
+function leverDirection(f) {
+  return !f.lever ? "for comparison" : f.clear ? (f.effect > 0 ? "more is better" : "less is better") : "no clear effect";
+}
+
+function drawLeverGroup(g) {
+  const id = `lv-${g.key}`;
+  $(`${id}-title`).textContent = g.title;
+  if (!g.ok) {
+    $(`${id}-verdict`).textContent = g.reason;
+    $(`${id}-note`).textContent = "";
+    $(`${id}-plot`).style.height = "60px";
+    draw(`${id}-plot`, [], baseLayout({ xaxis: { visible: false }, yaxis: { visible: false } }));
+    return;
+  }
+  $(`${id}-verdict`).textContent = g.verdict;
+  const names = g.factors.map((f) => `${leverName(f)}: avg ${leverNumber(f.key, f.mean)}${leverUnit(f)}, 1 SD = ${leverNumber(f.key, f.sd)}${leverUnit(f)}`);
+  const accent = css("--accent"), muted = css("--muted");
+  const colors = g.factors.map((f) => (!f.lever ? muted : f.clear ? accent : rgba("#378ADD", 0.45)));
+  const widest = Math.max(...g.factors.map((f) => Math.max(Math.abs(f.low), Math.abs(f.high))));
+  const traces = [
+    { x: g.factors.flatMap((f) => [f.low, f.high, null]), y: g.factors.flatMap((_, i) => [names[i], names[i], null]), mode: "lines",
+      line: { color: rgba("#378ADD", 0.45), width: 9 }, hoverinfo: "skip", showlegend: false },
+    { x: g.factors.map((f) => f.effect), y: names, mode: "markers", showlegend: false, marker: { size: 10, color: colors },
+      customdata: g.factors.map((f) => [f.low, f.high]),
+      hovertemplate: "%{x:+.1f} m for 1 SD more  (%{customdata[0]:+.1f} to %{customdata[1]:+.1f})<extra></extra>" },
+    { x: g.factors.map((f) => Math.max(f.high, 0) + widest * 0.06), y: names, mode: "text", showlegend: false, hoverinfo: "skip",
+      text: g.factors.map(leverDirection), textposition: "middle right", textfont: { size: 11, color: muted } },
+  ];
+  $(`${id}-plot`).style.height = Math.max(190, 44 * g.factors.length + 70) + "px";
+  draw(`${id}-plot`, traces, baseLayout({
+    margin: { l: 330, r: 20, t: 8, b: 44 },
+    xaxis: { title: { text: "Carry change (m) for 1 SD more of the factor" }, zeroline: true, zerolinewidth: 2, showgrid: true, range: [-widest * 1.15, widest * 1.9] },
+    yaxis: { type: "category", categoryorder: "array", categoryarray: names, autorange: "reversed", showgrid: true },
+  }));
+  $(`${id}-note`).textContent = `${g.n} shots in ${g.sessions} sessions, average carry ${num(g.carry_mean)} m (sd ${num(g.carry_sd)} m). These factors together explain ${Math.round(100 * g.r2)}% of the differences in carry.`;
+}
+
+async function swingLevers() {
+  if (!$("lv-club").value) return;
+  const d = await api("/api/swing/levers", { params: { label: $("lv-club").value } });
+  d.groups.forEach(drawLeverGroup);
+}
+
+function leverCell(f) {
+  if (!f) return "<td>–</td>";
+  const strength = Math.min(Math.abs(f.effect) / 6, 1) * 0.55;
+  const color = f.effect >= 0 ? `rgba(55,138,221,${strength})` : `rgba(232,144,58,${strength})`;
+  const text = `${signed(f.effect, 1)}`;
+  const title = `${signed(f.effect, 1)} m (${signed(f.low, 1)} to ${signed(f.high, 1)}) for 1 SD = ${leverNumber(f.key, f.sd)}${leverUnit(f)}`;
+  return `<td style="background:${color}" title="${title}">${f.clear ? `<b>${text}</b>` : `<span style="opacity:.75">${text}</span>`}</td>`;
+}
+
+async function swingLeverBag() {
+  const d = await api("/api/swing/levers-bag");
+  for (const group of d.groups) {
+    const head = group.factors.map((f) => `<th title="${f.title}">${leverName(f)}</th>`).join("");
+    const body = d.rows.map((r) => {
+      const g = r.groups[group.key];
+      if (!g.ok) return `<tr><td style="text-align:left">${r.label}</td><td class="muted" colspan="${group.factors.length + 2}">not enough shots or sessions with all of these factors</td></tr>`;
+      const cells = group.factors.map((f) => leverCell(g.factors.find((x) => x.key === f.key))).join("");
+      const biggest = g.biggest ? leverName(g.factors.find((x) => x.key === g.biggest)) : "none clear";
+      return `<tr><td style="text-align:left">${r.label}</td><td>${g.n}</td>${cells}<td style="text-align:left">${biggest}</td></tr>`;
+    }).join("");
+    $(`lvb-${group.key}-table`).innerHTML = `<tr><th style="text-align:left">Club</th><th>Shots</th>${head}<th style="text-align:left">Largest lever</th></tr>` + body;
   }
 }
 
@@ -950,6 +1025,7 @@ function wire() {
   for (const id of ["sw-session", "sw-baseline"]) $(id).addEventListener("change", guard(swingReview));
   for (const id of ["sw-club", "sw-metric"]) $(id).addEventListener("change", guard(swingProgress));
   for (const id of ["sw-disp-club", "sw-disp-session", "sw-disp-compare"]) $(id).addEventListener("change", guard(swingDispersion));
+  $("lv-club").addEventListener("change", guard(swingLevers));
   $("sw-card").addEventListener("click", guard(() => makeCard("swing", "sw")));
 
   for (const id of ["pt-session", "pt-baseline"]) $(id).addEventListener("change", guard(pitchingReview));

@@ -168,6 +168,37 @@
 
     <div class="card">
       <div class="row between">
+        <h2>What limits your distance?</h2>
+        <div class="controls"><label>Club <select id="lv-club"></select></label></div>
+      </div>
+      <p class="muted small" style="margin:0 0 6px">For this club, how many metres of carry one standard deviation of each factor is worth, from the shot-to-shot differences in your own data (the others held at their usual level). A bar to the right means more of the factor adds carry, a bar to the left means less of it does. A bar that crosses zero means the data cannot tell. Club head speed is shown for comparison only.</p>
+      <h3 id="lv-ball-title" style="margin:10px 0 2px;font-size:14px">What the ball does</h3>
+      <p id="lv-ball-verdict" style="margin:0 0 4px"></p>
+      <div id="lv-ball-plot" class="plot"></div>
+      <p class="muted small" id="lv-ball-note"></p>
+      <h3 id="lv-club-title" style="margin:14px 0 2px;font-size:14px">What the club does</h3>
+      <p id="lv-club-verdict" style="margin:0 0 4px"></p>
+      <div id="lv-club-plot" class="plot"></div>
+      <p class="muted small" id="lv-club-note"></p>
+      <ul class="muted small" style="margin:8px 0 0;padding-left:20px">
+        <li>This is an association within your own shots near your usual values, not an experiment. Factors move together, so treat a clear bar as a pointer to work on, and test it on the range.</li>
+        <li>The intervals redraw whole sessions, because the shots of one session are not independent.</li>
+        <li>Attack angle, dynamic loft, club path and face to path act through launch, spin and strike, so they explain less of the carry (the fit quality is in the note). The strike location, which would explain more, is only recorded for a few shots.</li>
+        <li>For club path and face to path a negative number is left. More carry is not the goal for every club: for wedges, a repeatable distance matters more.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>Levers across the bag</h2>
+      <p class="muted small" style="margin:0 0 6px">Metres of carry for one standard deviation more of each factor, for every club of the selected sessions. <b>Bold</b> is a clear effect (the 95% interval does not include zero); blue means more of it adds carry, orange means less of it does. The last column names the largest clear lever.</p>
+      <h3 style="margin:8px 0 2px;font-size:14px">What the ball does</h3>
+      <div class="table-wrap"><table id="lvb-ball-table"></table></div>
+      <h3 style="margin:12px 0 2px;font-size:14px">What the club does</h3>
+      <div class="table-wrap"><table id="lvb-club-table"></table></div>
+    </div>
+
+    <div class="card">
+      <div class="row between">
         <div><h2>Printed card</h2><p class="muted small">Built from all shots of the sessions selected on the Sessions tab, for the clubs ticked in the Bag tab, driver on top.</p></div>
         <button id="sw-card" type="button" class="primary">Generate swing card</button>
       </div>

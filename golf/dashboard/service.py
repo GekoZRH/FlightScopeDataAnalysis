@@ -36,6 +36,7 @@ from golf.stats.context import ALL_PREDICTORS, available_predictors, session_con
 from golf.stats.correlation import correlate
 from golf.stats.daily import DAILY_MEASURES, available_measures, daily_table, rolling_means, windows_for
 from golf.stats.difference import mean_difference
+from golf.stats.levers import GROUPS as LEVER_GROUPS, MIN_SESSIONS as LEVER_MIN_SESSIONS, MIN_SHOTS as LEVER_MIN_SHOTS, Levers, distance_levers
 from golf.stats.outcomes import round_result, stack_speed, swing_spread, swing_speed
 from golf.stats.rounds import ROUND_MEASURES, SUMMARY_ROWS, round_stats, rolling_by_round, summarise
 
@@ -393,6 +394,80 @@ def swing_overview(state: AppState) -> Dict:
         "sessions": sessions_of(df), "labels": labels, "loaded": state.shots["swing"] is not None,
         "measures": series_menu(),
     })
+
+
+# --- distance levers: which factors go with carry, per club ------------------------------------------------
+
+_LEVER_DECIMALS = {"smash": 3, "club_speed_mph": 1, "launch_v_deg": 1, "spin_rpm": 0, "aoa_deg": 1, "dynamic_loft_deg": 1,
+                   "club_path_deg": 1, "ftp_deg": 1}
+
+
+def _lever_cells(levers: Levers) -> List[Dict]:
+    return [{"key": f.key, "title": f.title, "unit": f.unit, "lever": f.lever, "mean": f.mean, "sd": f.sd,
+             "effect": f.effect, "low": f.low, "high": f.high, "clear": f.clear} for f in levers.factors]
+
+
+def _lever_verdict(label: str, levers: Levers) -> str:
+    """The levers of one view in words: the largest clear one first."""
+    clear = sorted((f for f in levers.factors if f.lever and f.clear), key=lambda f: -abs(f.effect))
+    if not clear:
+        return f"For the {label} no factor has a clear effect on carry in your shots (they matter little, or already sit near their best value)."
+
+    def part(f) -> str:
+        sd = f"{f.sd:.{_LEVER_DECIMALS[f.key]}f}" + (f" {f.unit}" if f.unit else "")
+        return f"{f.title.split(' (')[0].lower()} (+{abs(f.effect):.1f} m for {sd} {'more' if f.effect > 0 else 'less'})"
+
+    first = clear[0]
+    low, high = sorted((abs(first.low), abs(first.high)))
+    text = f"Largest lever for the {label}: {part(first)}, 95% interval {low:.1f} to {high:.1f} m."
+    if len(clear) > 1:
+        text += " Then " + ", ".join(part(f) for f in clear[1:]) + "."
+    return text
+
+
+def _lever_groups(state: AppState, shots: pd.DataFrame, label: str) -> Dict:
+    return distance_levers(shots, level=state.config.stats.ci_level)
+
+
+def swing_levers(state: AppState, label: str) -> Dict:
+    """The levers of carry for one club of the selected sessions, in both views."""
+    df = state.selected("swing")
+    labels = list(dict.fromkeys(df["label"])) if not df.empty else []
+    if label not in labels:
+        raise ValueError(f"Unknown club: {label}")
+    found = _lever_groups(state, df[df["label"] == label], label)
+    groups = []
+    for key, title, _ in LEVER_GROUPS:
+        result = found[key]
+        if result is None:
+            groups.append({"key": key, "title": title, "ok": False,
+                           "reason": f"Needs at least {LEVER_MIN_SHOTS} shots from {LEVER_MIN_SESSIONS} sessions that have all of these factors recorded."})
+            continue
+        groups.append({"key": key, "title": title, "ok": True, "n": result.n, "sessions": result.sessions, "carry_mean": result.carry_mean,
+                       "carry_sd": result.carry_sd, "r2": result.r2, "factors": _lever_cells(result), "verdict": _lever_verdict(label, result)})
+    return clean({"label": label, "ok": any(g["ok"] for g in groups), "groups": groups, "level": state.config.stats.ci_level})
+
+
+def swing_levers_bag(state: AppState) -> Dict:
+    """The levers of every club of the selected sessions, for the overview tables."""
+    df = state.selected("swing")
+    labels = list(dict.fromkeys(df["label"])) if not df.empty else []
+    rows = []
+    for label in labels:
+        found = _lever_groups(state, df[df["label"] == label], label)
+        groups = {}
+        for key, _, _ in LEVER_GROUPS:
+            result = found[key]
+            if result is None:
+                groups[key] = {"ok": False}
+                continue
+            biggest = result.biggest()
+            groups[key] = {"ok": True, "n": result.n, "sessions": result.sessions, "r2": result.r2,
+                           "factors": _lever_cells(result), "biggest": biggest.key if biggest else None}
+        rows.append({"label": label, "shots": int((df["label"] == label).sum()), "groups": groups})
+    return clean({"rows": rows, "level": state.config.stats.ci_level,
+                  "groups": [{"key": key, "title": title, "factors": [{"key": c, "title": ti, "unit": u, "lever": lv} for c, ti, u, lv in factors]}
+                             for key, title, factors in LEVER_GROUPS]})
 
 
 def swing_review(state: AppState, session: str, baseline: str = "last4") -> Dict:

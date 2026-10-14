@@ -96,6 +96,21 @@ The optional **fit line** is an ordinary least-squares line through all plotted 
 
 **Training before bed against sleep.** The nights are split into three groups: no strength training ended in the 12 hours before sleep started, a session ended 4 to 12 hours before, or one ended within 4 hours before (a night in the third group is not in the second). For each sleep measure the difference of each training group against the no-training group is calculated with **Welch's t interval** (it does not assume both groups vary equally). A group needs at least 3 nights with a value. As with the correlations, many measures are tried (16 differences), so about one in twenty will look clear by chance; the note counts how many to expect. Days with training differ from days without in other ways (weekday, how you feel, what you ate), so a clear difference is a hint and not proof that the training caused it.
 
+## Distance levers (Full swing)
+
+For one club, the carry of every shot (of the selected sessions) is fitted by a **multiple linear regression on standardised factors**: each factor has its mean subtracted and is divided by its standard deviation, so an effect is the change in carry in metres for **one standard deviation more** of that factor with the others held fixed. That makes factors with different units (mph, degrees, rpm, a smash factor) comparable. Two regressions are made per club:
+
+| View | Factors |
+|---|---|
+| What the ball does | club head speed, smash factor, launch angle, spin rate |
+| What the club does | club head speed, attack angle, dynamic loft, club path, face to path |
+
+Club head speed is in both as a reference and is never named as a lever. The low point of the swing is left out, because it is almost the same measurement as the attack angle (correlation about -0.99) and would produce huge opposite effects that cancel.
+
+**Intervals.** Shots of one session are alike (same day, same mat), so a plain regression interval would be too narrow. Each effect is re-estimated with each whole session left out in turn (a jackknife by session); the spread of those estimates gives the standard error, and the interval uses a t distribution with sessions - 1 degrees of freedom. A bootstrap that redraws whole sessions was tried first and rejected: in simulations with a non-existent effect it called the effect clear in 17% of the cases with 5 sessions and 10% with 8 (nominal 5%), while the leave-one-session-out interval gave 3 to 6% for 5 to 15 sessions, for both views. **Clear** means the interval does not contain zero. With 13 or so factors per club being tried, a few clear effects can still be chance.
+
+**What it cannot tell you.** The effect is the association within your own shot-to-shot variation near your usual values. It says nothing about values you never produce, and where an effect is about zero the factor is either unimportant or already at its best. The factors move together (a well struck shot also launches differently), and the regression separates them only as far as the data allows. The delivery factors have a weaker link to carry (R squared 15 to 50% against 80 to 95% for the ball flight) because strike location, which is recorded for only about one shot in eight, is missing; the ball flight view contains the strike quality through the smash factor. Club path and face to path are signed (negative is left), and carry is typically best near zero, so a linear effect says which side loses carry, not that more is always better. A club needs at least 30 shots from 4 sessions that have all the factors.
+
 ## Rounds
 
 **Score differential** is (strokes - course rating) x 113 / slope, the number the handicap system compares, so rounds on different courses and tees are comparable. It is calculated for the Garmin rounds from the tee box rating and slope in the scorecard; for competition rounds it is the value on the certificate.

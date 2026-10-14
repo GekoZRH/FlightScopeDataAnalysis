@@ -59,6 +59,8 @@ GET: Dict[str, Callable] = {
         s, _first(q, "outcome"), _first(q, "predictor"), q.get("club") or None, q.get("detrend", "1") == "1"),
     "/api/health/trend": lambda s, q, b: service.health_trend(s, _first(q, "measure"), q.get("period", "all")),
     "/api/health/training-sleep": lambda s, q, b: service.health_training_sleep(s, q.get("period", "all")),
+    "/api/swing/levers": lambda s, q, b: service.swing_levers(s, _first(q, "label")),
+    "/api/swing/levers-bag": lambda s, q, b: service.swing_levers_bag(s),
     "/api/rounds/overview": lambda s, q, b: service.rounds_overview(s),
     "/api/rounds/trend": lambda s, q, b: service.rounds_trend(s, _first(q, "source"), _first(q, "measure"), q.get("period", "all")),
     "/api/rounds/competition": lambda s, q, b: service.rounds_competition_table(s),
