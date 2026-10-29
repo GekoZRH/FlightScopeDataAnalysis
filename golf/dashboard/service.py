@@ -24,6 +24,8 @@ from golf.data.garmin import GarminData, describe_garmin, find_export_folders, l
 from golf.data.withings import WithingsData, describe_withings, find_weight_file, load_withings
 from golf.data.golfrounds import GolfRounds, describe_golf_rounds, load_golf_rounds
 from golf.data.competition import RECORD_NAME, load_record, update_record, with_round_keys
+from golf.data import drill as drill_store
+from golf.stats import drill as drill_stats
 from golf.data.stack import stack_files
 from golf.data.labels import FULL_SWING
 from golf.report.build import generate_card
@@ -36,6 +38,9 @@ from golf.stats.context import ALL_PREDICTORS, available_predictors, session_con
 from golf.stats.correlation import correlate
 from golf.stats.daily import DAILY_MEASURES, available_measures, daily_table, rolling_means, windows_for
 from golf.stats.difference import mean_difference
+from golf.targets import Targets, load_targets
+from golf.stats.driver import analyse_driver
+from golf.stats.intervals import wilson_interval
 from golf.stats.levers import GROUPS as LEVER_GROUPS, MIN_SESSIONS as LEVER_MIN_SESSIONS, MIN_SHOTS as LEVER_MIN_SHOTS, Levers, distance_levers
 from golf.stats.outcomes import round_result, stack_speed, swing_spread, swing_speed
 from golf.stats.rounds import ROUND_MEASURES, SUMMARY_ROWS, round_stats, rolling_by_round, summarise
@@ -63,6 +68,8 @@ class AppState:
         self.golf_stats: Optional[pd.DataFrame] = None          # one row per round with its statistics
         self.competition: Optional[pd.DataFrame] = None         # the record of competition rounds
         self.competition_notes: List[str] = []                  # things to check after reading the certificates
+        self.targets: Targets = Targets()                       # the target files (ranges, the driver chart)
+        self.driver_models: Dict = {}                           # fitted driver flight models, by the shots they were fitted to
         self.errors: Dict[str, str] = {}
         self.reload_data()
 
@@ -74,6 +81,7 @@ class AppState:
         self.reload_withings()
         self.reload_golf()
         self.reload_competition()
+        self.targets = load_targets(self.config.targets_dir)
         for mode in modes:
             if self.config.data_dir(mode) is None:        # no folder chosen: this kind of data is not used
                 self.shots[mode] = None
@@ -238,6 +246,19 @@ def dataset_info(state: AppState) -> Dict:
             "first": str(record["date"].min()), "last": str(record["date"].max()),
             "notes": state.competition_notes, "error": state.errors.get("competition", ""),
         }
+    targets_folder = state.config.targets_dir
+    if targets_folder is None:
+        info["targets"] = {"folder": "", "enabled": False, "loaded": False, "notes": [], "error": ""}
+    else:
+        info["targets"] = {"folder": str(targets_folder), "enabled": True, "loaded": state.targets.chart is not None or bool(state.targets.attack_angle),
+                           "notes": list(state.targets.notes), "error": ""}
+    drill_folder = state.config.drill_dir
+    if drill_folder is None:
+        info["drill"] = {"folder": "", "enabled": False, "loaded": False, "sessions": 0, "error": ""}
+    else:
+        sessions = drill_store.load_all(drill_folder)
+        info["drill"] = {"folder": str(drill_folder), "enabled": True, "loaded": drill_folder.is_dir(),
+                         "sessions": int(sessions["session"].nunique()) if len(sessions) else 0, "error": ""}
     info["golf"] = {"enabled": state.config.garmin_dir is not None, "loaded": state.golf is not None, "error": state.errors.get("golf", ""),
                     **(describe_golf_rounds(state.golf) if state.golf is not None else {})}
     withings_folder = state.config.withings_dir
@@ -265,6 +286,8 @@ def set_folders(state: AppState, folders: Dict[str, Optional[str]]) -> Dict:
             patch[f"{mode}_dir"] = ""
             continue
         folder = Path(value).expanduser()
+        if mode == "drill":
+            folder.mkdir(parents=True, exist_ok=True)                 # the drill folder may be new
         if not folder.is_dir():
             raise ValueError(f"{value} is not a folder")
         if mode == "garmin":
@@ -274,6 +297,8 @@ def set_folders(state: AppState, folders: Dict[str, Optional[str]]) -> Dict:
         elif mode == "competition":
             if not (any(folder.glob("*.pdf")) or (folder / RECORD_NAME).is_file()):
                 raise ValueError(f"No handicap certificate (PDF) or {RECORD_NAME} found in {value}")
+        elif mode == "drill":
+            pass                                                      # any folder: the sessions are written into it
         elif not (bool(stack_files(folder)) if mode == "stack" else any(folder.glob("*.csv"))):
             raise ValueError(f"No CSV files found in {value}")
         patch[f"{mode}_dir"] = str(folder)
@@ -392,7 +417,7 @@ def swing_overview(state: AppState) -> Dict:
     labels = list(dict.fromkeys(df["label"])) if not df.empty else []
     return clean({
         "sessions": sessions_of(df), "labels": labels, "loaded": state.shots["swing"] is not None,
-        "measures": series_menu(),
+        "measures": series_menu("swing"),
     })
 
 
@@ -496,14 +521,32 @@ SERIES = {
     "club_speed_sd": ("club_speed_mph", "sd", "Club head speed spread, sd (mph)", "Club"),
     "aoa": ("aoa_deg", "mean", "Angle of attack (deg)", "Club"),
     "club_path": ("club_path_deg", "mean", "Club path (deg, negative = left)", "Club"),
+    "face_to_path": ("ftp_deg", "mean", "Face to path (deg, negative = left)", "Club"),
     "dynamic_loft": ("dynamic_loft_deg", "mean", "Dynamic loft (deg)", "Club"),
     "spin_loft": ("spin_loft_deg", "mean", "Spin loft (deg)", "Club"),
 }
 
 
-def series_menu() -> List[Dict]:
-    """The measures offered in the pull-down menu of the third progress chart."""
-    return [{"key": key, "title": title, "group": group} for key, (_, _, title, group) in SERIES.items() if group]
+# The delivery measures that have a target range (see golf/targets.py): measure -> kind of range, and the "within the range" share of each.
+BAND_MEASURE = {"aoa": "attack_angle", "club_path": "club_path", "face_to_path": "face_to_path", "dynamic_loft": "dynamic_loft"}
+IN_RANGE = {
+    "aoa_in_range": ("aoa_deg", "attack_angle", "Angle of attack within the target range (% of shots)"),
+    "club_path_in_range": ("club_path_deg", "club_path", "Club path within the target range (% of shots)"),
+    "face_to_path_in_range": ("ftp_deg", "face_to_path", "Face to path within the target range (% of shots)"),
+    "dynamic_loft_in_range": ("dynamic_loft_deg", "dynamic_loft", "Dynamic loft within the target range (% of shots)"),
+}
+
+
+def series_menu(mode: str = "pitching") -> List[Dict]:
+    """The measures offered in the pull-down menu of the third progress chart (full swings also get the target ranges)."""
+    menu = [{"key": key, "title": title, "group": group} for key, (_, _, title, group) in SERIES.items() if group]
+    if mode == "swing":
+        menu += [{"key": key, "title": title, "group": "Target ranges"} for key, (_, _, title) in IN_RANGE.items()]
+    return menu
+
+
+def _share(values: pd.Series, band) -> float:
+    return float(100.0 * ((values >= band[0]) & (values <= band[1])).mean())
 
 
 def series(state: AppState, mode: str, label: str, measure: str) -> Dict:
@@ -512,6 +555,8 @@ def series(state: AppState, mode: str, label: str, measure: str) -> Dict:
     `dates` lists every selected session, so the charts show the same sessions for every club;
     `sessions` only holds the sessions in which this club was hit.
     """
+    if measure in IN_RANGE and mode == "swing":
+        return _in_range_series(state, label, measure)
     if measure not in SERIES:
         raise ValueError(f"Unknown measure: {measure}")
     column, kind, title, _ = SERIES[measure]
@@ -523,12 +568,41 @@ def series(state: AppState, mode: str, label: str, measure: str) -> Dict:
     if df.empty:
         return {"label": label, "title": title, "dates": dates, "sessions": []}
     group = df[df["label"] == label]
+    band = state.targets.band(BAND_MEASURE[measure], label) if mode == "swing" and measure in BAND_MEASURE else None
     summary = session_summary(group, column, by=["label"], level=state.config.stats.ci_level)
     sessions = [{
         "date": row["session_date"], "n": row["n"],
         "y": row[kind], "lo": row[f"{kind}_lo"], "hi": row[f"{kind}_hi"],
     } for _, row in summary.iterrows()]
-    return clean({"label": label, "title": title, "dates": dates, "sessions": sessions})
+    out = {"label": label, "title": title, "dates": dates, "sessions": sessions}
+    if band is not None:
+        values = group[column].dropna()
+        latest = group.dropna(subset=[column])
+        last = latest[latest["session_date"] == latest["session_date"].max()][column] if len(latest) else values
+        out["target"] = {"low": band[0], "high": band[1], "in_range": _share(values, band) if len(values) else None,
+                         "in_range_last": _share(last, band) if len(last) else None, "shots": int(len(values)),
+                         "last_session": str(latest["session_date"].max()) if len(latest) else ""}
+    return clean(out)
+
+
+def _in_range_series(state: AppState, label: str, measure: str) -> Dict:
+    """Per session, the share of shots of a club inside its target range."""
+    column, kind, title = IN_RANGE[measure]
+    df = state.selected("swing")
+    included = state.included("swing")
+    dates = sorted({str(d) for d in included["session_date"]}) if included is not None else []
+    band = state.targets.band(kind, label)
+    if df.empty or band is None:
+        reason = "" if band is not None else f"No target range for {label} in the target files."
+        return {"label": label, "title": title, "dates": dates, "sessions": [], "note": reason}
+    group = df[df["label"] == label].dropna(subset=[column])
+    sessions = []
+    for day, shots in group.groupby("session_date"):
+        hits = int(((shots[column] >= band[0]) & (shots[column] <= band[1])).sum())
+        lo, hi = wilson_interval(hits, len(shots), state.config.stats.ci_level)
+        sessions.append({"date": day, "n": len(shots), "y": 100.0 * hits / len(shots), "lo": lo, "hi": hi})
+    return clean({"label": label, "title": title, "dates": dates, "sessions": sessions, "percent": True,
+                  "target": {"low": band[0], "high": band[1], "in_range": None}})
 
 
 def _ring(x: np.ndarray, y: np.ndarray, coverage: float, state: AppState, grid: int = 90) -> List[List[float]]:
@@ -590,7 +664,25 @@ def dispersion(state: AppState, mode: str, label: str, session: str, compare: st
     carry = _change(now["carry_m"], before["carry_m"], "sd", state)
     lateral = _change(now["lateral_m"], before["lateral_m"], "sd", state)
     out["verdict"] = {"carry": carry["dir"], "lateral": lateral["dir"]}
+    out["window"] = _dispersion_window(state, pd.concat([now, before]))
     return clean(out)
+
+
+def _dispersion_window(state: AppState, shots: pd.DataFrame) -> Optional[Dict]:
+    """The part of the plane the dispersion plot shows: a fixed span around the average of the shots shown (None without shots).
+
+    The span is the same for every club (`dispersion_carry_m` and `dispersion_lateral_m`), so clubs can be compared by eye.
+    `outside` counts the shots that fall outside it.
+    """
+    if shots.empty:
+        return None
+    s = state.config.stats
+    carry_c, lateral_c = float(shots["carry_m"].mean()), float(shots["lateral_m"].mean())
+    carry = [carry_c - s.dispersion_carry_m / 2.0, carry_c + s.dispersion_carry_m / 2.0]
+    lateral = [lateral_c - s.dispersion_lateral_m / 2.0, lateral_c + s.dispersion_lateral_m / 2.0]
+    inside = shots["carry_m"].between(*carry) & shots["lateral_m"].between(*lateral)
+    return {"carry": carry, "lateral": lateral, "span_carry": s.dispersion_carry_m, "span_lateral": s.dispersion_lateral_m,
+            "center": {"carry": carry_c, "lateral": lateral_c}, "outside": int((~inside).sum()), "shots": int(len(shots))}
 
 
 # --- pitching ------------------------------------------------------------------------------
@@ -1191,6 +1283,163 @@ def rounds_garmin_summary(state: AppState) -> Dict:
             for key, title, fmt in SUMMARY_ROWS]
     return clean({"columns": [{"key": key, "title": title, "rounds": len(ids)} for key, title, ids in columns], "rows": rows,
                   "first": str(stats["date"].min()) if len(stats) else "", "last": str(last_day) if last_day else ""})
+
+
+# --- wedge distance drill ---------------------------------------------------------------------------------
+
+def _drill_folder(state: AppState):
+    folder = state.config.drill_dir
+    if folder is None:
+        raise ValueError("No folder for the drill sessions is chosen")
+    return folder
+
+
+def _pitching_fits(state: AppState) -> Dict:
+    """The speed-to-carry line of each wedge from the swing lengths the drill uses (10 o'clock and above)."""
+    pitching = state.included("pitching")
+    if pitching is None:
+        return drill_stats.wedge_fits(pd.DataFrame())
+    return drill_stats.wedge_fits(pitching[pitching["intent"] >= drill_stats.MIN_INTENT])
+
+
+def _drill_rows(frame: pd.DataFrame) -> List[Dict]:
+    """The shots of a session table for the page, with the miss of those already entered."""
+    errors = drill_stats.shot_errors(frame).set_index("n")
+    rows = []
+    for _, row in frame.iterrows():
+        entry = {"n": int(row["n"]), "wedge": row["wedge"], "target_m": row["target_m"], "target_mph": row["target_mph"], "slope": row["slope"],
+                 "tolerance_mph": row["tolerance_mph"], "speed_mph": row["speed_mph"], "carry_m": row["carry_m"], "done": bool(pd.notna(row["speed_mph"]))}
+        if entry["done"]:
+            e = errors.loc[int(row["n"])]
+            entry.update(err_mph=e["err_mph"], err_m=e["err_m"], hit=bool(e["hit"]), carry_err_m=e["carry_err_m"])
+        rows.append(entry)
+    return rows
+
+
+def drill_setup(state: AppState) -> Dict:
+    """What the drill can offer: the wedges with their target ladders, the defaults and the unfinished sessions."""
+    found = _pitching_fits(state)
+    wedges = [{"wedge": f.wedge, "n": f.n, "slope": f.slope, "r2": f.r2, "resid_sd": f.resid_sd,
+               "speed_range": [f.speed_min, f.speed_max], "ladder": drill_stats.ladder(f)} for f in found["fits"]]
+    unfinished = []
+    sessions = drill_store.load_all(state.config.drill_dir)
+    for session, group in sessions.groupby("session") if len(sessions) else []:
+        left = int(group["speed_mph"].isna().sum())
+        if left and len(group) > left:                                    # started and not finished
+            unfinished.append({"session": session, "started": group["started"].iloc[0], "done": int(len(group) - left), "shots": int(len(group))})
+    return clean({
+        "enabled": state.config.drill_dir is not None, "wedges": wedges,
+        "unavailable": [{"wedge": w, "reason": r} for w, r in found["unavailable"]],
+        "defaults": {"shots": drill_stats.DEFAULT_SHOTS, "tolerance_mph": drill_stats.DEFAULT_TOLERANCE_MPH},
+        "unfinished": unfinished[-5:],
+    })
+
+
+def drill_start(state: AppState, wedges: List[str], shots: int, tolerance_mph: float, seed: Optional[int] = None) -> Dict:
+    """Plan a session, write its file and return the planned shots."""
+    folder = _drill_folder(state)
+    if not 1 <= shots <= 200:
+        raise ValueError("A session has 1 to 200 shots")
+    if not 0.2 <= tolerance_mph <= 20:
+        raise ValueError("The tolerance is 0.2 to 20 mph")
+    fits = {f.wedge: f for f in _pitching_fits(state)["fits"]}
+    unknown = [w for w in wedges if w not in fits]
+    if unknown:
+        raise ValueError(f"No target distances for: {', '.join(unknown)}")
+    chosen = [fits[w] for w in dict.fromkeys(wedges)]
+    plan = drill_stats.plan_session(chosen, int(shots), np.random.default_rng(seed))
+    session = drill_store.start_session(folder, plan, float(tolerance_mph))
+    return drill_session(state, session)
+
+
+def drill_session(state: AppState, session: str) -> Dict:
+    """One session: its shots with the results entered so far (to continue it)."""
+    frame = drill_store.load_session(_drill_folder(state), session)
+    shots = _drill_rows(frame)
+    return clean({"session": session, "started": frame["started"].iloc[0], "tolerance_mph": float(frame["tolerance_mph"].iloc[0]),
+                  "shots": shots, "next": next((s["n"] for s in shots if not s["done"]), None)})
+
+
+def drill_record(state: AppState, session: str, n: int, speed_mph: float, carry_m: Optional[float] = None) -> Dict:
+    """Enter (or correct) the result of one shot of a session and give its miss."""
+    folder = _drill_folder(state)
+    frame = drill_store.record_shot(folder, session, int(n), float(speed_mph), None if carry_m is None else float(carry_m))
+    shots = _drill_rows(frame)
+    this = next(s for s in shots if s["n"] == int(n))
+    done = [s for s in shots if s["done"]]
+    return clean({"session": session, "shot": this, "entered": len(done), "shots": len(shots), "next": next((s["n"] for s in shots if not s["done"]), None),
+                  "summary": drill_stats.summarise(drill_stats.shot_errors(frame), state.config.stats.ci_level)})
+
+
+def drill_progress(state: AppState, wedge: Optional[str] = None) -> Dict:
+    """How close you got to the targets, session by session, and by target distance (all sessions)."""
+    level = state.config.stats.ci_level
+    data = drill_store.load_all(state.config.drill_dir)
+    errors = drill_stats.shot_errors(data) if len(data) else data
+    wedges = sorted(errors["wedge"].unique()) if len(errors) else []
+    if wedge:
+        if wedge not in wedges:
+            raise ValueError(f"No drill shots with the {wedge}")
+        errors = errors[errors["wedge"] == wedge]
+    sessions = []
+    for session, group in errors.groupby("session") if len(errors) else []:
+        if len(group) < drill_stats.MIN_SHOTS_FOR_SESSION:
+            continue
+        sessions.append({"session": session, "date": str(group["started"].iloc[0])[:10], "started": group["started"].iloc[0],
+                         "tolerance_mph": float(group["tolerance_mph"].iloc[0]), **drill_stats.summarise(group, level)})
+    sessions.sort(key=lambda s: s["started"])
+    targets = []
+    for (name, distance), group in errors.groupby(["wedge", "target_m"]) if len(errors) else []:
+        s = drill_stats.summarise(group, level)
+        targets.append({"wedge": name, "target_m": float(distance), "target_mph": float(group["target_mph"].median()), **s})
+    targets.sort(key=lambda t: (t["target_m"], t["wedge"]))
+    return clean({"wedges": wedges, "wedge": wedge or "", "sessions": sessions, "targets": targets, "level": level,
+                  "total_shots": int(len(errors))})
+
+
+# --- driver: launch and spin against the chart --------------------------------------------------------------
+
+def _driver_verdict(label: str, r: Dict) -> str:
+    t, g = r["typical"], r["gains"]
+    gap = t["launch"] - t["opt_launch"]
+    spin_gap = t["spin"] - t["opt_spin"]
+    launch = (f"Your {label} launches {abs(gap):.1f} deg {'below' if gap < 0 else 'above'} the chart value" if abs(gap) >= 0.5
+              else f"Your {label} launches within {abs(gap):.1f} deg of the chart value")
+    spin = (f"and its spin is {abs(spin_gap):.0f} rpm {'below' if spin_gap < 0 else 'above'} it" if abs(spin_gap) >= 100 else "and its spin is close to it")
+    text = (f"{launch} for your usual ball speed ({t['ball_mph']:.0f} mph) and angle of attack ({t['aoa_deg']:+.1f} deg: {t['opt_launch']:.1f} deg and {t['opt_spin']:.0f} rpm), {spin}.")
+    both = g["both"]
+    if both["mean"] is not None:
+        text += f" Hitting the chart's launch angle and spin on every shot would add about {both['mean']:.1f} m of carry"
+        if both["lo"] is not None:
+            text += f" (95% interval {both['lo']:.1f} to {both['hi']:.1f} m)"
+        text += "."
+    return text
+
+
+def swing_driver(state: AppState, label: Optional[str] = None) -> Dict:
+    """The driver's launch angle and spin against the optimal chart, and what the gap is worth in carry."""
+    chart = state.targets.chart
+    if chart is None:
+        return {"ok": False, "reason": "The chart of optimal launch and spin is not available.", "notes": list(state.targets.notes)}
+    df = state.selected("swing")
+    drivers = df[df["club"] == "driver"] if not df.empty else df
+    labels = list(dict.fromkeys(drivers["label"])) if len(drivers) else []
+    if not labels:
+        return {"ok": False, "reason": "No driver shots in the selected sessions and clubs.", "notes": list(state.targets.notes), "labels": []}
+    if label:
+        if label not in labels:
+            raise ValueError(f"Unknown club: {label}")
+        drivers = drivers[drivers["label"] == label]
+    key = (label or "", len(drivers), round(float(drivers["carry_m"].sum()), 3), round(float(drivers["spin_rpm"].sum()), 3))
+    result = analyse_driver(drivers, chart, level=state.config.stats.ci_level, model=state.driver_models.get(key))
+    if result is None:
+        return {"ok": False, "labels": labels, "notes": list(state.targets.notes),
+                "reason": "Needs at least 30 driver shots from 3 sessions with ball speed, launch angle, spin, spin axis, attack angle, peak height and carry."}
+    state.driver_models[key] = result.pop("_model")
+    grid = {"speeds": [float(v) for v in chart.speeds[::-1]], "aoas": [float(v) for v in chart.aoas],
+            "launch": chart.launch[::-1].tolist(), "spin": chart.spin[::-1].tolist()}
+    return clean({"ok": True, "label": label or "", "labels": labels, "verdict": _driver_verdict(label or labels[0], result), "chart": grid,
+                  "folder": str(state.targets.folder) if state.targets.folder else "", "notes": list(state.targets.notes), **result})
 
 
 # --- sessions -------------------------------------------------------------------------------------

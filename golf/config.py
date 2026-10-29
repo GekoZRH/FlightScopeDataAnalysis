@@ -27,7 +27,7 @@ BAG_MODES = ("swing", "pitching")      # the kinds that have a bag and a printed
 # data (watch, scale) that the Health tab shows and that the practice results are related to.
 HEALTH_KINDS = ("garmin", "withings")
 ROUND_SOURCES = ("competition", "garmin")        # where rounds come from: the certificates, the Garmin app
-FOLDER_KINDS = MODES + HEALTH_KINDS + ("competition",)         # competition: the handicap certificates and the record of rounds
+FOLDER_KINDS = MODES + HEALTH_KINDS + ("competition", "drill")         # competition: the handicap certificates and the record of rounds
 
 
 @dataclass(frozen=True)
@@ -76,6 +76,8 @@ class StatsSettings:
     min_shots_compare: int = 8     # shots per period needed to compare two periods
     min_shots_session: int = 5     # shots of one session needed to compare it with earlier ones
     seed: int = 12345
+    dispersion_carry_m: float = 30.0      # the dispersion plot always shows this many metres of carry, centred on the average of the shots
+    dispersion_lateral_m: float = 30.0    # ... and this many metres sideways, so every club is drawn at the same scale
 
 
 @dataclass(frozen=True)
@@ -93,6 +95,8 @@ class Config:
     garmin_dir: Optional[Path] = None
     withings_dir: Optional[Path] = None
     competition_dir: Optional[Path] = None      # the handicap certificates (PDF) and the record of rounds made from them
+    drill_dir: Optional[Path] = None            # the sessions of the wedge distance drill (one CSV file each)
+    targets_dir: Optional[Path] = None          # the target files you edit by hand (see golf/targets.py)
     timezone: str = "Europe/Zurich"     # where the practice took place, to line it up with the watch (which uses UTC)
     default_bag: Dict[str, BagSpec] = field(default_factory=dict)   # golf.toml, before local choices
     excluded_sessions: Dict[str, frozenset] = field(default_factory=dict)   # mode -> session dates left out
@@ -113,6 +117,8 @@ class Config:
             return self.withings_dir
         if mode == "competition":
             return self.competition_dir
+        if mode == "drill":
+            return self.drill_dir
         raise ValueError(f"Unknown kind of data {mode!r}, expected one of {FOLDER_KINDS}")
 
     def cards_dir(self, mode: str) -> Path:
@@ -201,6 +207,8 @@ def load_config(path: Optional[Path] = None, local_path: Optional[Path] = None) 
     garmin_dir = _folder(root, local.get("garmin_dir", paths.get("garmin_dir")))
     withings_dir = _folder(root, local.get("withings_dir", paths.get("withings_dir")))
     competition_dir = _folder(root, local.get("competition_dir", paths.get("competition_dir")))
+    drill_dir = _folder(root, local.get("drill_dir", paths.get("drill_dir")))
+    targets_dir = _folder(root, local.get("targets_dir", paths.get("targets_dir")))
     # Sessions left out are remembered per data folder, so another folder starts with all sessions.
     excluded = {
         mode: frozenset(local.get("sessions", {}).get(mode, {}).get(str(folder), {}).get("excluded", []))
@@ -218,6 +226,8 @@ def load_config(path: Optional[Path] = None, local_path: Optional[Path] = None) 
         garmin_dir=garmin_dir,
         withings_dir=withings_dir,
         competition_dir=competition_dir,
+        drill_dir=drill_dir,
+        targets_dir=targets_dir,
         timezone=str(raw.get("garmin", {}).get("timezone", "Europe/Zurich")),
         output_dir=root / paths["output_dir"],
         label_aliases=dict(aliases.get("label", {})),

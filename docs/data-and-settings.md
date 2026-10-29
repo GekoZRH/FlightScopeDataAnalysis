@@ -47,6 +47,52 @@ What is read (everything else, which is a lot, is ignored):
 - A night appears once even if several files hold it. A session without a recorded night has no sleep values; it is simply left out of the comparisons that need them.
 - The export is large (it can hold years of data and be over 100 MB) but it is only read when you press Load data, and it never leaves your computer. `garmindata/` is ignored by git.
 
+## Target files
+
+Some numbers are targets that you set and change by hand. They live in the folder `targets` (`targets_dir` in `golf.toml`; the files are plain text and are committed to git, since they are settings and not personal data). After editing a file press **Load data** in the dashboard to read it again. A file that is missing or has a wrong entry is not a stop: the dashboard lists the problem under *Warnings* and uses the rest.
+
+| File | What it holds |
+|---|---|
+| `delivery_ranges.toml` | The target range of the **angle of attack** for each club, and of the **club path** and **face to path** (a default for all clubs, ±2 degrees, and entries for single clubs) |
+| `dynamic_loft_ranges.toml` | The target range of the **dynamic loft** for each club |
+| `driver_optimal_launch.csv`, `driver_optimal_spin.csv` | The PING **optimal launch angle** (degrees) and **optimal spin** (rpm) for a driver, by ball speed (rows, mph) and angle of attack (columns, degrees) |
+
+In the two `.toml` files each entry is `club = [lowest, highest]` in degrees, for example:
+
+```toml
+[attack_angle]
+driver = [2.0, 5.0]
+"7i" = [-5.0, -3.0]        # every 7-iron
+"8i 241" = [-6.5, -4.5]    # only this variant: the variant wins over the club
+
+[club_path]
+default = [-2.0, 2.0]       # every club without an entry of its own
+driver = [-3.0, 1.0]
+```
+
+Clubs are named as in the dashboard (`driver`, `3w`, `4h`, `5i`, `pw`, `gw`, ..., or with the variant like `8i 241`). A club that has no entry has no band (club path and face to path use `default`). Club path and face to path are 0 when square, negative to the left. Lines starting with `#` are comments.
+
+The starting values are: the attack angle ranges from common launch monitor norms (driver +2 to +5, fairway woods -4 to -1, long irons -4 to -2, 6- and 7-iron -5 to -3, 8- and 9-iron -6 to -4, wedges -7 to -4); club path and face to path ±2; and for the **dynamic loft** each club's range is your own average at the time the file was made plus and minus 1.5 degrees, except the driver (14.5 to 17), so the band shows how steady the loft is. Replace the loft ranges by the lofts you want to deliver.
+
+The two driver chart files are grids: the first column is the ball speed, the other column headers are the angles of attack, every cell a number. You can change values, and add or remove rows and columns as long as the grid is complete and both files have the same ball speeds and angles of attack. The chart was typed in from the PING picture; two cells were hard to read (200 mph at -4 degrees launch, 6.4 or 8.4, and 110 mph at -6 degrees spin, printed as `300 rpm`, taken as 3050): check them against the original if they matter.
+
+## Drill sessions
+
+The wedge drill (Drill tab) writes one CSV file per session into the drill folder (`drill_dir` in `golf.toml`, default `DrillData`, chosen in the dashboard like the other folders; it is created when a session starts and ignored by git). The file `drill_2026-10-17_183005.csv` is created when the session starts, with every planned shot, and each entered shot is written into its row at once. The columns are:
+
+| Column | Meaning |
+|---|---|
+| `session`, `started` | The session name (its start time) and the start time |
+| `n` | The number of the shot in the session |
+| `wedge` | The wedge called out, for example `gw 50` |
+| `target_m`, `target_mph` | The target distance and the target club head speed of that shot |
+| `slope` | Metres of carry per mph for that wedge when the session was made, used to turn a speed miss into metres |
+| `tolerance_mph` | A shot is a hit within this many mph of the target (set at the start of the session) |
+| `speed_mph`, `carry_m` | What you entered: the club head speed (empty until entered) and the optional carry |
+| `entered` | When the shot was entered |
+
+Targets, slope and tolerance are stored with every shot, so old sessions stay comparable when the targets change later (for example when you have more pitching data). Files that do not follow the name `drill_<date>_<time>.csv`, or do not have these columns, are ignored. You can open the files in a spreadsheet; do not change the first columns.
+
 ## Garmin rounds (golf)
 
 The same Garmin export holds your golf scorecards in `DI_CONNECT/DI-GOLF`: `Golf-SCORECARD.json` has every round, with per hole the strokes, putts, where the tee shot went (fairway hit, left or right) and penalty strokes, and the tee (course rating, slope). Next to it is one raw file per round, `Golf-SCORECARD_RAWDATA-<round id>.fit`, with the course name and the par and stroke index of each hole, which the JSON does not have. Garmin does not document that file; the message numbers used (190 course, 193 hole) were read off your files and checked against the scorecards.
@@ -122,7 +168,7 @@ The file is in the project folder and is committed to git. Relative paths are re
 
 | Section | Setting | Meaning |
 |---|---|---|
-| `[paths]` | `swing_dir`, `pitching_dir`, `stack_dir`, `garmin_dir`, `withings_dir`, `competition_dir` | Data folders used until you choose others in the dashboard. An empty value (`""`) means: no data of that kind |
+| `[paths]` | `swing_dir`, `pitching_dir`, `stack_dir`, `garmin_dir`, `withings_dir`, `competition_dir`, `drill_dir`, `targets_dir` | Data folders used until you choose others in the dashboard. An empty value (`""`) means: no data of that kind |
 | `[garmin]` | `timezone` | Your local time zone, to turn Garmin's UTC times into local times (default `Europe/Zurich`) |
 | | `output_dir` | Where cards are written (default `Output`) |
 | `[stats]` | `window_weeks`, `fallback_weeks` | The two "Last N weeks" quick buttons on the Sessions tab (4 and 12) |
@@ -131,6 +177,7 @@ The file is in the project folder and is committed to git. Relative paths are re
 | | `skew_alpha` | Significance level of the skew test (0.05) |
 | | `ci_level` | Level of the intervals in the charts (0.95) |
 | | `min_shots_session` | Shots a session needs for a dispersion ring or a tighter/broader label (5) |
+| | `dispersion_carry_m`, `dispersion_lateral_m` | The span of the dispersion plot in metres of carry and sideways (30 and 30), centred on the average of the shots shown, the same for every club |
 | | `seed` | Fixed random seed, so the dispersion rings are the same every time |
 | | `n_bootstrap`, `min_shots_compare` | Only used by the bootstrap comparison in the statistics library, which the dashboard does not use at present |
 | `[aliases.*]` | | See above |

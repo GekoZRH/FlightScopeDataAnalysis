@@ -4,7 +4,7 @@
 
 ```
 conda activate golf            # Python 3.13; Python >= 3.11 is needed (tomllib)
-python -m pytest               # about 380 tests, roughly a minute
+python -m pytest               # about 480 tests, roughly a minute
 ```
 
 `requirements.txt` lists the packages. The tests use made-up data in temporary folders and their own copy of the configuration, so they neither need your CSV files nor change your settings. A few extra checks run against your real data and are skipped when it is absent. The web server tests start a server on a free port.
@@ -28,6 +28,8 @@ golf/
     competition.py        handicap certificate (PDF text) -> rounds; the permanent record of rounds (CSV)
     fit.py                minimal Garmin FIT file reader
     golfrounds.py         Garmin golf scorecards (JSON + FIT): full rounds and their holes
+    drill.py              drill session files (one CSV per session, written shot by shot)
+  targets.py              the hand-edited target files: ranges per club and the driver's optimal chart
   stats/
     univariate.py         normal / skew-normal fit and ranges
     bivariate.py          joint lateral-carry model (Gaussian copula)
@@ -42,6 +44,9 @@ golf/
     difference.py         Welch interval for the difference of two group means
     rounds.py             statistics of golf rounds: score, fairways, greens, putting; averages over the last rounds
     levers.py             which factors go with carry for one club (standardised regression, jackknife by session)
+    flightmodel.py        a simple ball flight model fitted to your shots (carry from ball speed, launch and spin)
+    driver.py             driver launch and spin against the optimal chart, and what the gap is worth
+    drill.py              wedge drill: speed-to-carry line per wedge, target ladder, session plan, misses and summaries
   report/
     cards.py              draws a card (matplotlib)
     build.py              chooses the shots, draws and saves the card
@@ -50,7 +55,7 @@ golf/
     api.py                one function per URL, user errors become ApiError
     server.py             small local web server (standard library)
     static/               index.html, app.js, app.css (Plotly is served from the installed package)
-tests/                    labels, columns, loading, statistics, cards, dashboard, stack, garmin, correlations, health, competition, fit, golf rounds, rounds tab, levers
+tests/                    labels, columns, loading, statistics, cards, dashboard, stack, garmin, correlations, health, competition, fit, golf rounds, rounds tab, levers, drill, targets, driver, bands
 docs/                     this documentation
 Analysis_legacy/          the original scripts
 ```
@@ -78,6 +83,12 @@ The page talks to the server with JSON. Requests carry the current choices; noth
 | `/api/state` | GET | Folders, file and shot counts, notes about unselected clubs; `enabled` is false for a kind without a folder |
 | `/api/load` | POST | Set the data folders (`swing_dir`, `pitching_dir`, `stack_dir`, `garmin_dir`, `withings_dir`) and reload. An empty value turns that kind off; a key that is left out keeps its folder |
 | `/api/garmin/overview` | GET | Outcomes, clubs and predictors for the Health tab (internally still called `garmin`); says whether data and sessions suffice |
+| `/api/drill/setup` | GET | Wedges with their target ladders, defaults, unfinished sessions |
+| `/api/drill/start` | POST | Plan a session and write its file (`wedges`, `shots`, `tolerance_mph`, optional `seed`) |
+| `/api/drill/session` | GET | One session with the results so far (`id`), to continue it |
+| `/api/drill/record` | POST | Enter or correct a shot (`session`, `n`, `speed_mph`, optional `carry_m`) and get its miss |
+| `/api/drill/progress` | GET | Sessions and targets summarised (optional `wedge`) |
+| `/api/swing/driver` | GET | The driver against the optimal chart: gaps, what-if table, carry map, per session (`label` optional) |
 | `/api/swing/levers` | GET | The levers of carry for one club in both views, with a sentence about the largest (`label`) |
 | `/api/swing/levers-bag` | GET | The levers of every club of the selected sessions |
 | `/api/rounds/overview` | GET | Both kinds of round with their measures and years |
@@ -123,6 +134,7 @@ The server listens on `127.0.0.1` only. Because any web page you have open could
 | Relate another watch measure to the practice results | add it to `PREDICTORS` and to `_garmin_row()` in `stats/context.py`; a scale measure goes into `BODY_PREDICTORS` and `_body_row()`; the Health tab picks it up |
 | Add a health measure (trends and the 'against each other' plot) | add it to `GARMIN_MEASURES` or `BODY_MEASURES` and to `daily_table()` in `stats/daily.py` |
 | Add a result to explain | add it to `OUTCOMES` in `dashboard/service.py` and write its per-session function in `stats/outcomes.py` (a round result: `ROUND_OUTCOME_COLUMN` and a column of `round_stats`) |
+| Add a measure with a target range | add it to `BAND_MEASURE` and `IN_RANGE` in `dashboard/service.py`, a table to `Targets` in `targets.py` and a section to the toml file |
 | Add a factor to the distance levers | add it to `BALL_FLIGHT` or `CLUB` in `stats/levers.py` (and its decimals to `_LEVER_DECIMALS` in `dashboard/service.py` and `LEVER_DECIMALS` in `app.js`) |
 | Add a statistic of the Garmin rounds | add the per-hole fact in `_holes_with_par()`, the per-round column in `round_stats()` and, for the overview, `summarise()` and `SUMMARY_ROWS` in `stats/rounds.py`; a chart measure goes into `ROUND_MEASURES` |
 | Change a threshold | `[stats]` in `golf.toml`, documented in `StatsSettings` in `config.py` |
@@ -131,7 +143,8 @@ Write a test with the change. The dashboard tests build a small synthetic data s
 
 ## Git
 
-- Personal data never goes into git: `*.csv`, `SwingData/`, `PitchingData/`, `stackdata/`, `garmindata/`, `withingsdata/`, `CompetitionResults/`, `Plot/`, `Output/` and `golf.local.json` are ignored. If you really need a CSV in the repository (for example a small test file), add it with `git add -f`.
+- The files in `targets/` (including the two chart CSVs, which `.gitignore` lets through with `!targets/*.csv`) are settings and are committed.
+- Personal data never goes into git: `*.csv`, `SwingData/`, `PitchingData/`, `stackdata/`, `garmindata/`, `withingsdata/`, `CompetitionResults/`, `DrillData/`, `Plot/`, `Output/` and `golf.local.json` are ignored. If you really need a CSV in the repository (for example a small test file), add it with `git add -f`.
 - `.gitattributes` keeps text files with the same line endings in the repository whatever the machine.
 - Local branches only so far; nothing has been pushed.
 

@@ -1,0 +1,28 @@
+# Target ranges for the dynamic loft in degrees: [lowest, highest], per club.
+#
+# Drawn as a shaded band in the progress chart of the Full swing tab ("Dynamic loft"), with the share of your shots inside it
+# ("Dynamic loft within the target range"). Edit the numbers, then press "Load data" in the dashboard.
+#
+# A club is named as in the dashboard: "7i 245" is that variant, "7i" would cover every 7-iron (the variant wins).
+# A club that is not listed has no band.
+#
+# STARTING VALUES: they are NOT recommendations. Except for the driver, each range is your own average dynamic loft of that
+# club on the day this file was made, plus and minus 1.5 degrees (rounded to half a degree), so the band shows how steady
+# the loft is. Replace them with the lofts you want to deliver. The driver range follows the launch analysis
+# (about 14.5 to 17 degrees of dynamic loft for about 14 degrees of launch at +3 degrees angle of attack).
+
+[dynamic_loft]
+"driver ping" = [14.5, 17.0]    # your average 13.1
+"3w ts2" = [12.0, 15.0]    # your average 13.3
+"5w ts2" = [14.5, 17.5]    # your average 16.2
+"4i 245" = [19.5, 22.5]    # your average 21.2
+"5i 245" = [19.5, 22.5]    # your average 21.2
+"6i 245" = [23.5, 26.5]    # your average 25.0
+"7i 245" = [26.5, 29.5]    # your average 28.1
+"8i 245" = [30.0, 33.0]    # your average 31.7
+"8i 241" = [36.0, 39.0]    # your average 37.3
+"9i 241" = [39.5, 42.5]    # your average 41.1
+"pw 241" = [44.0, 47.0]    # your average 45.3
+"gw 50" = [48.5, 51.5]    # your average 50.0
+"sw 54" = [51.5, 54.5]    # your average 52.8
+"lw 58" = [53.5, 56.5]    # your average 55.2

@@ -60,6 +60,7 @@ The **rings** show where the middle 68% and 95% of the shots land, jointly in la
 - Lateral and carry each get their own distribution (normal or skew-normal as above). They are joined by a Gaussian copula using the correlation of the two, so a link between lateral miss and carry (for example faster swings drifting right) is kept.
 - The ring is the line of equal density that encloses the stated share of shots. It is found by sampling 40,000 points from the model, so it is smooth but not an exact formula; a fixed random seed makes it identical every time.
 - A ring needs at least 5 shots (`min_shots_session`).
+- The plot always shows the same span for every club (`dispersion_carry_m` and `dispersion_lateral_m`, 30 m each), centred on the mean of the carry and of the lateral value of all shots in the plot (this session and the earlier ones). Shots outside the window are not drawn and are counted in the note. The rings are still calculated from all the shots.
 
 The labels **tighter / similar / broader** compare the spread of the session with that of the earlier shots, for carry and for lateral separately. The test is exact for small samples and assumes roughly normal shots: it takes the ratio of the two variances (an F test), turns the 95% interval of that ratio into an interval for the difference in spread, and says "tighter" or "broader" only when the whole interval is below or above zero. Each side needs at least 5 shots.
 
@@ -95,6 +96,26 @@ The optional **fit line** is an ordinary least-squares line through all plotted 
 **Smoothed lines (Trends).** The averages are over the last N days, counted in days and not in values, because nights are missing when the watch is off and weighings come every week or two. Nights: 7 and 28 days (3 and 10 values needed); weighings: 30 and 90 days (2 and 3 values needed).
 
 **Training before bed against sleep.** The nights are split into three groups: no strength training ended in the 12 hours before sleep started, a session ended 4 to 12 hours before, or one ended within 4 hours before (a night in the third group is not in the second). For each sleep measure the difference of each training group against the no-training group is calculated with **Welch's t interval** (it does not assume both groups vary equally). A group needs at least 3 nights with a value. As with the correlations, many measures are tried (16 differences), so about one in twenty will look clear by chance; the note counts how many to expect. Days with training differ from days without in other ways (weekday, how you feel, what you ate), so a clear difference is a hint and not proof that the training caused it.
+
+## Driver against the optimal chart
+
+**The chart.** For each driver shot the optimal launch angle and spin rate are read from the chart by interpolating between the grid points (linearly in ball speed and in angle of attack; outside the chart the value at its edge is used). The *launch gap* and *spin gap* are your value minus the chart's; negative launch means launching lower than the chart.
+
+**The flight model.** To say what a gap is worth in metres, the ball is flown in a vertical plane under gravity, drag (Cd = cd0 + cd_s x S) and the lift of backspin (Cl = min(cl_a x S, cl_max)), with S the spin ratio (spin x radius / speed). The four numbers are fitted to the carry and the peak height of your own driver shots (least squares). The backspin used is the spin times the cosine of the spin axis. With your data the model reproduces the carry to about 3.2 m (77% of the differences between shots; the carries spread by 6.6 m); with a finer integration step the same differences result. Only **differences** of the model are used (carry with the chart's value minus carry with your value for the same shot), so a constant error of the model cancels. The gain from the launch angle agrees with what the data show directly: at the same ball speed, drives launched 12 to 14.5 degrees carried about 6 to 10 m further than drives launched 8 to 10 degrees.
+
+**Limits.** The model is only fitted where your shots are (launch angles about 7 to 17 degrees, spin about 1500 to 4000 rpm): it says nothing reliable beyond, so the carry map stops near your shots. The simulator's own ball flight is what the model imitates; it is not a physics reference. The chart is a general optimum for total distance, not for your driver or your simulator. The attack angle rows of the what-if table assume that you could then deliver the chart's launch angle and spin for the larger attack angle. A gain of about a metre is within the accuracy of the model.
+
+**Averages and intervals.** The gaps and gains are averages over all shots, each shot against the chart value for its own ball speed and attack angle. The 95% intervals leave one whole session out at a time (a jackknife by session, t distribution on sessions - 1 degrees of freedom), because the shots of one session are alike. The table for a typical shot uses your average ball speed and attack angle and your average launch and spin, so its numbers differ a little from the per-shot averages. Shots 'close to the chart' are within 1 degree of launch and 250 rpm of spin.
+
+**Target ranges.** The share of shots inside a target range is the number of shots between its low and high value, in percent, per session with a Wilson interval; the note under a progress chart gives it for all selected sessions and for the latest one.
+
+## Wedge distance drill
+
+**Targets.** For each wedge the carry is fitted against the club head speed with a straight line over its pitching shots of swing lengths 10 o'clock and above (10, 11 and full; 9 o'clock swings are left out), requiring at least 30 shots, a range of speeds of at least 15 mph and at least 50% of the carry explained. The target speed for a distance is the speed at which this line gives that distance (carry = intercept + slope x speed, solved for speed) and is rounded to whole mph. Distances are offered in steps of 10 m inside the carries you have produced, and only when the speed is within what you have swung (no extrapolation). With all swing lengths the speed explained 72 to 88% of the carry, with a spread of 6 to 9 m around the line, mostly strike quality (the residual goes with the smash factor, correlation 0.8 to 0.9). Leaving out the 9 o'clock swings shortens the range of speeds and so the line explains less (about 50 to 75%) and has a different slope; the gap wedge fell below the 50% limit in your data. The distance belonging to a speed is an average; a speed miss is converted to metres with the slope of the line (about 0.8 to 1.3 m per mph then).
+
+**Session plan.** The shots are shared between the chosen wedges (the remainder at random), the targets of a wedge are taken from its shuffled ladder and the ladder is used up before a target comes round again, and the wedges are drawn at random without the same wedge twice in a row when there is a choice.
+
+**Misses.** Miss = entered club head speed minus target speed (positive: too fast); the miss in metres is that times the slope; with an entered carry the carry miss is the carry minus the target distance. Per session (or wedge, or target): the average absolute miss (with a t interval from 5 shots), the average signed miss (the tendency), the standard deviation of the misses, the share of hits (a miss of at most the tolerance; Wilson interval) and the average absolute carry miss, which is only given when at least half of the shots (and 3) have a carry. Sessions with fewer than 3 entered shots are not counted in the progress. Compare sessions with the same tolerance; the tolerance is stored with each session and shown in the table.
 
 ## Distance levers (Full swing)
 
@@ -140,6 +161,7 @@ In the overview table a percentage is calculated over all holes of the rounds (a
 | `min_shots` (12) | Cards mark clubs with fewer shots with a `*` |
 | `min_shots_skew` (25), `skew_alpha` (0.05) | When a skewed distribution is used |
 | `min_shots_session` (5) | Smallest session for rings and for tighter/broader labels |
+| `dispersion_carry_m`, `dispersion_lateral_m` (30, 30) | Span of the dispersion plot in metres, around the average of the shots |
 | `ci_level` (0.95) | Level of the intervals in the progress charts and of the Garmin correlations |
 
 ## Things to keep in mind

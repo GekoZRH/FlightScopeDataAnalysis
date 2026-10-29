@@ -15,11 +15,11 @@ The dashboard opens in your browser at `http://127.0.0.1:8765/`. It only listens
 
 ## The page
 
-At the top are the data folders (full swing, pitching, stack, Garmin, Withings and competition results), then the tabs: **Sessions**, **Full swing**, **Pitching**, **Stack**, **Rounds** and **Health** on the left and **Bag** and **Wedge intents** on the right. The page opens on the first tab that has data, normally Full swing.
+At the top are the data folders (full swing, pitching, stack, Garmin, Withings and competition results), then the tabs: **Sessions**, **Full swing**, **Pitching**, **Drill**, **Stack**, **Rounds** and **Health** on the left and **Bag** and **Wedge intents** on the right. The page opens on the first tab that has data, normally Full swing.
 
 ### Data folders
 
-Type the folder with your full swing CSV exports, the folder with your pitching CSV exports, the folder with your stack CSV exports, the folder with your Garmin export, the folder with your Withings export and the folder with your handicap certificate (competition results), or press **Browse** to pick them in the Windows folder dialog (it can open behind the browser window). Press **Load data** to read them. Below the buttons you see how many files, shots and sessions were found, and the last session.
+Type the folder with your full swing CSV exports, the folder with your pitching CSV exports, the folder with your stack CSV exports, the folder with your Garmin export, the folder with your Withings export and the folder with your handicap certificate (competition results) and the folder for the drill sessions, or press **Browse** to pick them in the Windows folder dialog (it can open behind the browser window). Press **Load data** to read them. Below the buttons you see how many files, shots and sessions were found, and the last session.
 
 **You do not need all of them.** Leave a folder empty if you have no data of that kind: that kind is then not used, its tabs are not shown, and nothing else is affected. If all folders are empty the page says so. Garmin or Withings data alone is enough: you then get the Health tab only, and competition results alone give the Rounds tab only. Fill a folder in again and press Load data to bring the kind back.
 
@@ -58,7 +58,19 @@ The small `n=` shows how many historic shots there are. Only the clubs ticked on
 
 The shaded band is the 95% interval of each point (see [Statistics](statistics.md)). A session in which you did not hit the club has no point; the line continues across it. Wide bands mean few shots.
 
-**Dispersion against earlier sessions.** Choose a club, a session and what to compare with. The plot shows where the shots of that session landed (lateral against carry) over the earlier shots, with the area holding the middle 68% of shots (solid) and 95% (dotted for this session, dashed for the earlier shots). Faint rings are the earlier sessions one by one. The table gives the carry and lateral spread now and before, and the labels "tighter", "similar" or "broader" say whether the difference is larger than normal shot-to-shot variation. "Similar" is the usual answer with a few shots; it does not prove nothing changed.
+**Dispersion against earlier sessions.** Choose a club, a session and what to compare with. The plot shows where the shots of that session landed (lateral against carry) over the earlier shots, always at the **same scale for every club**: 30 m of carry and 30 m sideways, centred on the average of the shots shown (the settings `dispersion_carry_m` and `dispersion_lateral_m` in `golf.toml`; the note under the plot gives the centre and how many shots, if any, fall outside the window), with the area holding the middle 68% of shots (solid) and 95% (dotted for this session, dashed for the earlier shots). Faint rings are the earlier sessions one by one. The table gives the carry and lateral spread now and before, and the labels "tighter", "similar" or "broader" say whether the difference is larger than normal shot-to-shot variation. "Similar" is the usual answer with a few shots; it does not prove nothing changed.
+
+**Target ranges in the progress chart.** In the third progress chart you can choose **Angle of attack**, **Club path**, **Face to path** or **Dynamic loft**. When the club has a target range (see the *Target files* section of [Data and settings](data-and-settings.md)) it is drawn as a green band behind the data, and the note under the chart says how many of your shots are inside it (all selected sessions and the latest session). The measures **... within the target range** in the group *Target ranges* show, per session, the percentage of the shots that were inside the range, with an interval; that is the number to bring up. A club without a range has no band. Pitching charts have no bands.
+
+**Driver: launch and spin against the optimal chart.** For the driver, every shot is compared with the PING optimal launch and spin chart (two editable files, see *Target files*), which gives the best launch angle and spin rate for the ball speed and angle of attack of that shot.
+
+- The first sentence says how far your driver is from the chart on average, and what hitting the chart's launch angle and spin on every shot would add in metres of carry, with a 95% interval.
+- **What it would be worth** is a table for one typical shot (your average ball speed and angle of attack): the launch angle at the chart value, the spin at the chart value, both, a steeper upswing (+1, +2, +3 degrees angle of attack, with the chart's launch and spin for it) and, for comparison, one more mph of ball speed. The carry is calculated with a ball flight model fitted to your own driver shots; the note says how well it reproduces your carries (about 3 m). A gain of about a metre is within what the model can tell.
+- **Where your shots are** shows the carry the model gives over launch angle and spin at your average ball speed (colours and lines), your shots (dots), your average (x) and the chart's value (star). The map only covers the region where your shots are, because the model says nothing reliable about launch angles you never hit.
+- **Session by session** shows the launch gap (0 is the chart value) and the carry gain per session: both should go towards zero as the launch conditions improve.
+- **The chart in use** shows the table itself with the cell nearest to your usual shot marked.
+
+The chart aims at the best total distance for an average driver; your simulator and driver may differ a little, so use it as a target to approach, not as a rule.
 
 **What limits your distance?** Choose a club and see which factors go with its carry in your own shots. For each factor the chart gives the metres of carry that **one standard deviation more of it** is worth (the other factors held at their usual level), with its 95% interval and your average. A bar to the right means more of the factor adds carry, a bar to the left means less of it does, and a bar that crosses zero means the data cannot tell. Two views:
 
@@ -83,6 +95,18 @@ For wedge swings with intents (full, 11, 10, 9 o'clock).
 - **Printed card.** See below.
 
 A `*` after a name in the straightness plot and the distance table means there are fewer than 12 shots, so the numbers are less reliable.
+
+### Drill tab
+
+A practice drill for distance control with the wedges. It needs your pitching data, because the targets come from it.
+
+1. **Choose the wedges** and the number of shots (default 24) and the **tolerance** (default: a shot is a hit within 2 mph of the target). The table shows, for each wedge, how well club head speed predicts its carry in your own swings of **10 o'clock and above** (10, 11 and full swings together; 9 o'clock swings are not used), and the **targets**: distances in steps of 10 m with the club head speed that carries that far on average. A wedge is offered only with at least 30 of these swings over a wide range of speeds and when club head speed explains at least half of its carry; otherwise the table says why it is not offered.
+2. **Start session.** The drill calls out one shot at a time, in random order, every wedge about equally often and never the same wedge twice in a row: for example *gw 50: target 58 mph, about 60 m*. Hit the shot in the simulator, type the **club head speed** you got (and, if you like, the **carry**) and press Enter. You see the miss in mph and in estimated metres at once, and how the session is going.
+3. **Back** lets you correct the previous entries (an entry can be overwritten). **Finish session** leaves a session early; **Unfinished** sessions are listed in the setup card, so you can carry on later.
+
+Every shot is saved immediately in the drill folder (`DrillData` by default), one CSV file per session (see [Data and settings](data-and-settings.md)); nothing is lost if you close the browser. **Progress** shows, session by session, the average miss, the share of shots within the tolerance, your tendency (too fast or too slow), the spread of the misses and, when you entered carries, the average carry miss, each for all wedges or for one wedge, with an interval for each session. **Which targets are hardest?** shows the average miss at each target.
+
+Keep in mind: the drill trains **speed control**. The distance next to a target is an average: at the same club head speed the carry still varies by about 6 to 9 m, mostly with how well the ball is struck, so the metres shown for a speed miss are estimates. Enter the carry as well to measure the distance miss directly.
 
 ### Stack tab
 

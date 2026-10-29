@@ -1,0 +1,19 @@
+# Optimal LAUNCH ANGLE in degrees for a driver, by ball speed and angle of attack.
+# Source: the PING 'Optimal launch & spin chart' for the driver, typed in from the picture.
+# Rows: driver ball speed in mph. Columns: angle of attack in degrees (the header row).
+# Edit any number; keep the grid complete. Lines starting with # are ignored. Press 'Load data' in the dashboard after editing.
+# Two cells were hard to read in the picture: 200 mph at -4 deg launch (6.4, may be 8.4) and 110 mph at -6 deg spin (3050, printed '300').
+ball_speed_mph,-10,-8,-6,-4,-2,0,2,4,6,8,10
+200,2.5,3.6,4.9,6.4,7.9,9.3,10.8,12.5,14.0,15.6,17.1
+190,3.0,4.2,5.5,7.0,8.4,9.8,11.3,12.8,14.3,16.0,17.5
+180,3.6,4.9,6.2,7.5,9.0,10.4,11.9,13.3,14.8,16.4,17.9
+170,4.3,5.7,6.9,8.2,9.6,11.0,12.4,13.9,15.3,16.8,18.2
+160,5.2,6.5,7.7,9.0,10.3,11.7,13.0,14.4,15.9,17.3,18.7
+150,6.2,7.4,8.6,9.8,11.1,12.4,13.7,15.1,16.4,17.9,19.3
+140,7.3,8.3,9.5,10.7,12.0,13.2,14.5,15.8,17.2,18.5,19.9
+130,8.4,9.4,10.6,11.7,12.8,14.1,15.3,16.6,17.9,19.2,20.6
+120,9.6,10.6,11.6,12.7,13.8,15.0,16.2,17.4,18.7,19.9,21.2
+110,10.9,11.8,12.7,13.9,14.9,15.9,17.1,18.2,19.5,20.7,21.9
+100,11.9,12.9,13.9,14.9,15.9,16.9,18.0,19.1,20.3,21.4,22.6
+90,12.7,13.9,15.0,15.9,16.9,18.0,19.0,20.0,21.1,22.2,23.3
+80,13.8,14.5,15.8,16.9,17.8,18.8,19.9,20.8,21.8,22.9,24.0

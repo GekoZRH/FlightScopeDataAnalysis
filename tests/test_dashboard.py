@@ -124,7 +124,7 @@ def test_series_fixed_charts_and_menu(state):
     keys = [m["key"] for m in menu]
     assert "carry_mean" not in keys and "club_speed" not in keys           # already shown as fixed charts
     assert {"carry_sd", "lat_sd", "ball_speed", "spin", "descent", "height", "smash"} <= set(keys)
-    assert {m["group"] for m in menu} == {"Distribution", "Ball flight", "Club"}
+    assert {m["group"] for m in menu} == {"Distribution", "Ball flight", "Club", "Target ranges"}
 
 
 def test_series_for_a_measure_the_data_lacks_is_empty(state):
@@ -505,3 +505,49 @@ def test_scatter_skips_shots_missing_a_measure_and_rejects_unknown_ones(state):
 def test_scatter_menu_is_offered_by_the_overview(state):
     keys = [m["key"] for m in call(state, "/api/pitching/overview")["shot_measures"]]
     assert {"carry", "lateral", "club_speed", "ball_speed", "spin", "smash", "descent", "height"} <= set(keys)
+
+
+# --- the dispersion plot has one scale for every club ---------------------------------------------------------
+
+def test_the_dispersion_window_is_30_m_around_the_average_for_every_club(state):
+    session = call(state, "/api/swing/overview")["sessions"][0]
+    driver = call(state, "/api/swing/dispersion", label="driver ping", session=session)
+    iron = call(state, "/api/swing/dispersion", label="7i 245", session=session)
+    for d in (driver, iron):
+        w = d["window"]
+        assert w["span_carry"] == 30 and w["span_lateral"] == 30
+        assert w["carry"][1] - w["carry"][0] == pytest.approx(30) and w["lateral"][1] - w["lateral"][0] == pytest.approx(30)
+        assert sum(w["carry"]) / 2 == pytest.approx(w["center"]["carry"]) and sum(w["lateral"]) / 2 == pytest.approx(w["center"]["lateral"])
+    assert abs(driver["window"]["center"]["carry"] - iron["window"]["center"]["carry"]) > 30                    # the windows follow the clubs
+
+
+def test_the_window_is_centred_on_this_session_and_the_shots_before(state):
+    session = call(state, "/api/swing/overview")["sessions"][0]
+    d = call(state, "/api/swing/dispersion", label="driver ping", session=session)
+    carries = d["now"]["carry"] + d["before"]["carry"]
+    laterals = d["now"]["lateral"] + d["before"]["lateral"]
+    assert d["window"]["center"]["carry"] == pytest.approx(sum(carries) / len(carries), abs=0.01)
+    assert d["window"]["center"]["lateral"] == pytest.approx(sum(laterals) / len(laterals), abs=0.01) and d["window"]["shots"] == len(carries)
+
+
+def test_shots_outside_the_window_are_counted(state):
+    session = call(state, "/api/swing/overview")["sessions"][0]
+    d = call(state, "/api/swing/dispersion", label="driver ping", session=session)
+    w = d["window"]
+    inside = sum(1 for c, l in zip(d["now"]["carry"] + d["before"]["carry"], d["now"]["lateral"] + d["before"]["lateral"])
+                 if w["carry"][0] <= c <= w["carry"][1] and w["lateral"][0] <= l <= w["lateral"][1])
+    assert w["outside"] == w["shots"] - inside and 0 <= w["outside"] < w["shots"]
+
+
+def test_a_club_without_shots_has_no_window(state):
+    session = call(state, "/api/swing/overview")["sessions"][0]
+    assert call(state, "/api/swing/dispersion", label="putter", session=session)["window"] is None
+
+
+def test_the_span_is_a_setting(state):
+    import dataclasses
+    session = call(state, "/api/swing/overview")["sessions"][0]
+    stats = dataclasses.replace(state.config.stats, dispersion_carry_m=20.0, dispersion_lateral_m=10.0)
+    state.config = dataclasses.replace(state.config, stats=stats)
+    w = call(state, "/api/swing/dispersion", label="driver ping", session=session)["window"]
+    assert w["carry"][1] - w["carry"][0] == pytest.approx(20) and w["lateral"][1] - w["lateral"][0] == pytest.approx(10)

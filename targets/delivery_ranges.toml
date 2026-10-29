@@ -1,0 +1,39 @@
+# Target ranges for the club delivery numbers, in degrees: [lowest, highest].
+#
+# They are drawn as a shaded band in the progress charts of the Full swing tab (choose "Angle of attack", "Club path" or
+# "Face to path" in the menu), and the measures "... within the target range" show the share of your shots inside the band.
+# Edit the numbers, then press "Load data" in the dashboard.
+#
+# A club is named as in the dashboard: "7i" covers every 7-iron, "8i 241" only that variant (the variant wins).
+# A club that is not listed has no band. Club path and face to path use [default] for every club that has no entry of its own.
+# Club path and face to path: 0 is square to the target line / the path, negative is left, positive is right.
+
+[attack_angle]
+# starting values from common launch monitor norms for good ball strikers: positive with the driver, steeper for shorter clubs
+"driver" = [2.0, 5.0]
+"3w" = [-4.0, -1.0]
+"5w" = [-4.0, -1.0]
+"7w" = [-4.0, -1.0]
+"3h" = [-4.0, -2.0]
+"4h" = [-4.0, -2.0]
+"5h" = [-4.0, -2.0]
+"3i" = [-4.0, -2.0]
+"4i" = [-4.0, -2.0]
+"5i" = [-4.0, -2.0]
+"6i" = [-5.0, -3.0]
+"7i" = [-5.0, -3.0]
+"8i" = [-6.0, -4.0]
+"9i" = [-6.0, -4.0]
+"pw" = [-7.0, -4.0]
+"aw" = [-7.0, -4.0]
+"gw" = [-7.0, -4.0]
+"sw" = [-7.0, -4.0]
+"lw" = [-7.0, -4.0]
+
+[club_path]
+default = [-2.0, 2.0]
+# "driver" = [-3.0, 1.0]       # an example of a club of its own
+
+[face_to_path]
+default = [-2.0, 2.0]
+# "driver" = [-3.0, 0.0]

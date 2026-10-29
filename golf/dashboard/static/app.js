@@ -86,7 +86,7 @@ function draw(id, traces, layout) {
 }
 
 // One line per series over the sessions; evenly spaced, labelled with the session date.
-function sessionChart(id, dates, series, { title, band = false, height }) {
+function sessionChart(id, dates, series, { title, band = false, height, target = null, percent = false }) {
   const traces = [];
   series.forEach((s) => {
     if (band && s.lo) {
@@ -106,12 +106,18 @@ function sessionChart(id, dates, series, { title, band = false, height }) {
     });
   });
   if (height) $(id).style.height = height + "px";
-  draw(id, traces, baseLayout({
+  const layout = baseLayout({
     showlegend: series.length > 1,
     // the order must be given: Plotly otherwise orders categories by first appearance, and the band skips sessions without data
     xaxis: { type: "category", categoryorder: "array", categoryarray: dates, tickvals: dates, ticktext: dates.map(dateLabel), showgrid: true },
-    yaxis: { title: { text: title }, showgrid: true, gridcolor: css("--border-strong") },
-  }));
+    yaxis: Object.assign({ title: { text: title }, showgrid: true, gridcolor: css("--border-strong") }, percent ? { range: [0, 100] } : {}),
+  });
+  if (target) {                                          // the target range of the measure: a shaded band behind the data
+    layout.shapes = [{ type: "rect", xref: "paper", x0: 0, x1: 1, yref: "y", y0: target.low, y1: target.high, fillcolor: rgba("#1D9E75", 0.16), line: { width: 0 }, layer: "below" }];
+    layout.annotations = [{ xref: "paper", x: 1, xanchor: "right", yref: "y", y: target.high, yanchor: "bottom", text: "target range", showarrow: false, font: { size: 11, color: css("--muted") } }];
+    if (!percent && dates.length) traces.push({ x: [dates[0], dates[0]], y: [target.low, target.high], mode: "markers", marker: { opacity: 0 }, hoverinfo: "skip", showlegend: false });  // keeps the band inside the axis
+  }
+  draw(id, traces, layout);
 }
 
 // ---------------------------------------------------------------- data panel
@@ -149,6 +155,11 @@ async function renderDatasets(datasets) {
   else parts.push(`Competition: ${cp.rounds} rounds, ${dateLabel(cp.first)} to ${dateLabel(cp.last)}`);
   if (cp.enabled && cp.error && cp.loaded) warnings.push(`Competition: the certificate could not be read (${cp.error}); the record made so far is used.`);
   for (const note of (cp.notes || [])) warnings.push(`Competition: ${note}`);
+  const tg = datasets.targets;
+  if (tg && tg.enabled) for (const note of tg.notes) warnings.push(`Targets: ${note}`);
+  const dr = datasets.drill;
+  $("drill-dir").value = dr.folder;
+  if (dr.enabled) parts.push(`Drill: ${dr.sessions} sessions`);
   const gf = datasets.golf;
   if (gf && gf.loaded) parts.push(`Garmin rounds: ${gf.rounds} full rounds, ${dateLabel(gf.first)} to ${dateLabel(gf.last)}`);
   const w = datasets.withings;
@@ -174,6 +185,7 @@ function applyAvailability(datasets) {
     pitching: loaded("pitching"), wedges: loaded("pitching"), stack: loaded("stack"),
     garmin: loaded("garmin") || loaded("withings"),
     rounds,
+    drill: loaded("pitching") || Boolean(datasets.drill && datasets.drill.sessions > 0),
   };
   document.querySelectorAll(".tab").forEach((tab) => (tab.hidden = !available[tab.dataset.tab]));
   $("tabs").hidden = !anyData;
@@ -182,14 +194,14 @@ function applyAvailability(datasets) {
 }
 
 function firstAvailableTab() {
-  return ["swing", "pitching", "stack", "sessions", "rounds", "garmin"].find((name) => available[name]);
+  return ["swing", "pitching", "drill", "stack", "sessions", "rounds", "garmin"].find((name) => available[name]);
 }
 
 async function loadData() {
   const body = {
     swing_dir: $("swing-dir").value.trim(), pitching_dir: $("pitching-dir").value.trim(), stack_dir: $("stack-dir").value.trim(),
     garmin_dir: $("garmin-dir").value.trim(), withings_dir: $("withings-dir").value.trim(),
-    competition_dir: $("competition-dir").value.trim(),
+    competition_dir: $("competition-dir").value.trim(), drill_dir: $("drill-dir").value.trim(),
   };
   const data = await api("/api/load", { body });
   await renderDatasets(data.datasets);
@@ -215,7 +227,7 @@ async function loadSwing() {
   fillSelect($("sw-disp-club"), o.labels);
   fillSelect($("lv-club"), o.labels);
   fillMeasureMenu($("sw-metric"), o.measures);
-  await Promise.all([swingReview(), swingProgress(), swingDispersion(), swingLevers(), swingLeverBag()]);
+  await Promise.all([swingReview(), swingProgress(), swingDispersion(), swingLevers(), swingLeverBag(), swingDriver()]);
 }
 
 function fillMeasureMenu(select, measures, fallback) {
@@ -246,8 +258,10 @@ async function swingReview() {
 // One measure per session for one club, for the swing or the pitching tab.
 async function progressChart(path, label, measure, id, color) {
   const d = await api(path, { params: { label, measure } });
+  const quiet = $(id + "-note");
   if (!d.sessions.length) {
-    draw(id, [], baseLayout({ annotations: [{ text: "No data for this selection", showarrow: false, font: { color: css("--muted") } }], xaxis: { visible: false }, yaxis: { visible: false } }));
+    draw(id, [], baseLayout({ annotations: [{ text: d.note || "No data for this selection", showarrow: false, font: { color: css("--muted") } }], xaxis: { visible: false }, yaxis: { visible: false } }));
+    if (quiet) quiet.textContent = d.note || "";
     return;
   }
   // every selected session is on the axis; sessions without this club have no point and the line bridges them
@@ -255,7 +269,19 @@ async function progressChart(path, label, measure, id, color) {
   const pick = (field) => d.dates.map((date) => (byDate.has(date) ? byDate.get(date)[field] : null));
   sessionChart(id, d.dates, [{
     name: d.title, color, y: pick("y"), lo: pick("lo"), hi: pick("hi"), n: pick("n"),
-  }], { title: d.title, band: true });
+  }], { title: d.title, band: true, target: d.percent ? null : (d.target || null), percent: Boolean(d.percent) });
+  const note = $(id + "-note");
+  if (note) note.textContent = rangeNote(d);
+}
+
+function rangeNote(d) {
+  if (d.note) return d.note;
+  const t = d.target;
+  if (!t) return "";
+  const range = `${signed(t.low, 1)} to ${signed(t.high, 1)}`.replace(/\+/g, "");
+  if (t.in_range == null) return `Target range ${range} (edit the files in the targets folder).`;
+  const last = t.in_range_last == null ? "" : `, ${num(t.in_range_last, 0)}% in the latest session (${dateLabel(t.last_session)})`;
+  return `Target range ${range}: ${num(t.in_range, 0)}% of the ${t.shots} shots of the selected sessions are inside it${last}. Edit the ranges in the targets folder and press Load data.`;
 }
 
 async function swingProgress() {
@@ -301,10 +327,15 @@ async function swingDispersion() {
     traces.push(line(d.rings.now["95"], accent, "dot", 2, "now 95%", false));
     traces.push(line(d.rings.now["68"], accent, "solid", 2.5, "now 68%"));
   }
+  const w = d.window;                                   // the same span for every club, around the average of the shots shown
   draw("sw-disp", traces, baseLayout({
-    xaxis: { title: { text: "Lateral (m, negative = left)" }, zeroline: true },
-    yaxis: { title: { text: "Carry (m)" } },
+    xaxis: Object.assign({ title: { text: "Lateral (m, negative = left)" }, zeroline: true }, w ? { range: w.lateral } : {}),
+    yaxis: Object.assign({ title: { text: "Carry (m)" } }, w ? { range: w.carry } : {}),
   }));
+  $("sw-disp-note").textContent = w
+    ? `The plot shows ${num(w.span_carry, 0)} m of carry and ${num(w.span_lateral, 0)} m sideways around the average of the shots shown (carry ${num(w.center.carry, 1)} m, lateral ${signed(w.center.lateral, 1)} m), the same for every club.`
+      + (w.outside ? ` ${w.outside} of ${w.shots} shots lie outside this window and are not visible.` : "")
+    : "";
   $("sw-disp-table").innerHTML = disperionTable(d);
 }
 
@@ -559,6 +590,229 @@ async function swingLeverBag() {
     }).join("");
     $(`lvb-${group.key}-table`).innerHTML = `<tr><th style="text-align:left">Club</th><th>Shots</th>${head}<th style="text-align:left">Largest lever</th></tr>` + body;
   }
+}
+
+// ---------------------------------------------------------------- wedge drill
+
+const drill = { session: null, shots: [], index: 0, tolerance: 2 };
+
+async function loadDrill() {
+  const d = await api("/api/drill/setup");
+  const box = $("dr-wedges");
+  const chosen = new Set([...box.querySelectorAll("input:checked")].map((i) => i.value));
+  const first = box.children.length === 0;
+  box.innerHTML = d.wedges.map((w) => {
+    const on = first || chosen.has(w.wedge) ? " checked" : "";
+    return `<label class="chip"><input type="checkbox" value="${w.wedge}"${on}> ${w.wedge}</label>`;
+  }).join("") || '<span class="muted">No wedge has enough pitching shots yet.</span>';
+  $("dr-ladders").innerHTML = "<tr><th style='text-align:left'>Wedge</th><th>Fit</th><th>Targets: distance and club head speed</th></tr>"
+    + d.wedges.map((w) => `<tr><td style="text-align:left">${w.wedge}</td><td>${Math.round(100 * w.r2)}% of carry from speed, ${num(w.slope, 2)} m per mph, spread ±${num(w.resid_sd, 0)} m</td>`
+      + `<td style="text-align:left">${w.ladder.map((l) => `${l.distance.toFixed(0)} m: <b>${l.speed.toFixed(0)}</b> mph`).join(" &nbsp; ")}</td></tr>`).join("");
+  $("dr-ladder-note").textContent = d.unavailable.length
+    ? "Not offered: " + d.unavailable.map((u) => `${u.wedge} (${u.reason})`).join("; ") + "."
+    : "The speeds come from the line of carry against club head speed of each wedge, over its 10 o'clock, 11 o'clock and full swings. They are rounded to whole mph.";
+  $("dr-start").disabled = !d.enabled || !d.wedges.length;
+  if (!d.enabled) $("dr-msg").textContent = "Choose a folder for the drill sessions at the top of the page.";
+  $("dr-unfinished").innerHTML = d.unfinished.length
+    ? "Unfinished: " + d.unfinished.map((u) => `<button type="button" data-session="${u.session}">${dateLabel(u.started.slice(0, 10))} ${u.started.slice(11, 16)} (${u.done} of ${u.shots})</button>`).join(" ")
+    : "";
+  await drillProgress();
+}
+
+function drillSelectedWedges() {
+  return [...$("dr-wedges").querySelectorAll("input:checked")].map((i) => i.value);
+}
+
+async function startDrill() {
+  const wedges = drillSelectedWedges();
+  if (!wedges.length) { showError("Choose at least one wedge."); return; }
+  const d = await api("/api/drill/start", { body: { wedges, shots: Number($("dr-shots").value), tolerance_mph: Number($("dr-tol").value) } });
+  openDrill(d);
+}
+
+async function resumeDrill(session) {
+  openDrill(await api("/api/drill/session", { params: { id: session } }));
+}
+
+function openDrill(d) {
+  drill.session = d.session;
+  drill.shots = d.shots;
+  drill.tolerance = d.tolerance_mph;
+  drill.index = d.next == null ? 0 : d.shots.findIndex((s) => s.n === d.next);
+  $("dr-run-card").hidden = false;
+  $("dr-feedback").textContent = "";
+  renderDrillShot();
+  $("dr-run-card").scrollIntoView({ block: "start" });
+}
+
+function renderDrillShot() {
+  const s = drill.shots[drill.index];
+  const total = drill.shots.length, done = drill.shots.filter((x) => x.done).length;
+  $("dr-title").textContent = `Shot ${s.n} of ${total}`;
+  $("dr-count").textContent = `${done} entered`;
+  $("dr-target").innerHTML = `<b>${s.wedge}</b>: target <b>${s.target_mph.toFixed(0)} mph</b> &nbsp;&asymp; ${s.target_m.toFixed(0)} m `
+    + `<span class="muted" style="font-size:16px">(hit if ${(s.target_mph - drill.tolerance).toFixed(1)} to ${(s.target_mph + drill.tolerance).toFixed(1)} mph)</span>`;
+  $("dr-speed").value = s.done ? s.speed_mph : "";
+  $("dr-carry").value = s.done && s.carry_m != null ? s.carry_m : "";
+  const rows = drill.shots.map((x, i) => {
+    const miss = x.done ? `${signed(x.err_mph, 1)} mph (${signed(x.err_m, 1)} m)` : "";
+    const cm = x.done && x.carry_err_m != null ? `${signed(x.carry_err_m, 1)} m` : "";
+    const mark = x.done ? (x.hit ? "&#10003;" : "") : "";
+    return `<tr${i === drill.index ? " style='font-weight:600'" : ""}><td>${x.n}</td><td style="text-align:left">${x.wedge}</td><td>${x.target_m.toFixed(0)} m</td><td>${x.target_mph.toFixed(0)}</td>`
+      + `<td>${x.done ? num(x.speed_mph, 1) : ""}</td><td>${miss}</td><td>${x.done && x.carry_m != null ? num(x.carry_m, 1) : ""}</td><td>${cm}</td><td>${mark}</td></tr>`;
+  }).join("");
+  $("dr-shots-table").innerHTML = "<tr><th>#</th><th style='text-align:left'>Wedge</th><th>Target</th><th>Target mph</th><th>Speed (mph)</th><th>Miss</th><th>Carry (m)</th><th>Carry miss</th><th>Hit</th></tr>" + rows;
+  $("dr-speed").focus();
+}
+
+async function saveDrillShot() {
+  const s = drill.shots[drill.index];
+  const speed = $("dr-speed").value.trim();
+  if (speed === "") { showError("Enter the club head speed."); return; }
+  const carry = $("dr-carry").value.trim();
+  const r = await api("/api/drill/record", { body: { session: drill.session, n: s.n, speed_mph: Number(speed), carry_m: carry === "" ? null : Number(carry) } });
+  drill.shots[drill.index] = r.shot;
+  const e = r.shot;
+  $("dr-feedback").innerHTML = `Shot ${e.n}: ${signed(e.err_mph, 1)} mph (about ${signed(e.err_m, 1)} m) &mdash; <b>${e.hit ? "within the tolerance" : "outside the tolerance"}</b>`
+    + (e.carry_err_m != null ? `; carry ${signed(e.carry_err_m, 1)} m from the target` : "")
+    + `. So far: average miss ${num(r.summary.mae_mph, 1)} mph, ${num(r.summary.hit_rate, 0)}% within the tolerance.`;
+  if (r.next == null) {
+    renderDrillShot();
+    $("dr-title").textContent = "Session complete";
+    $("dr-target").textContent = `All ${r.shots} shots entered.`;
+    await drillProgress();
+    return;
+  }
+  drill.index = drill.shots.findIndex((x) => x.n === r.next);
+  renderDrillShot();
+}
+
+function drillBack() {
+  if (drill.index > 0) { drill.index -= 1; renderDrillShot(); }
+}
+
+async function finishDrill() {
+  $("dr-run-card").hidden = true;
+  drill.session = null;
+  await loadDrill();
+}
+
+const DRILL_MEASURES = {
+  mae_mph: ["Average miss (mph)", "mae_lo", "mae_hi"], hit_rate: ["Shots within the tolerance (%)", "hit_lo", "hit_hi"],
+  bias_mph: ["Tendency (mph, positive = too fast)", null, null], sd_mph: ["Spread of the misses (mph)", null, null],
+  carry_mae_m: ["Average carry miss (m)", null, null],
+};
+
+async function drillProgress() {
+  const wedge = $("dr-wedge").value || "";
+  const d = await api("/api/drill/progress", { params: { wedge } });
+  const keep = $("dr-wedge").value;
+  fillSelect($("dr-wedge"), ["", ...d.wedges], ["All wedges", ...d.wedges]);
+  if (keep && d.wedges.includes(keep)) $("dr-wedge").value = keep;
+  $("dr-progress-card").hidden = !d.sessions.length;
+  $("dr-target-card").hidden = !d.targets.length;
+  if (!d.sessions.length) return;
+  const [title, lo, hi] = DRILL_MEASURES[$("dr-measure").value];
+  const key = $("dr-measure").value;
+  const dates = d.sessions.map((s) => s.session);
+  const labels = d.sessions.map((s) => `${dateLabel(s.date)} ${s.started.slice(11, 16)}`);
+  const y = d.sessions.map((s) => s[key]);
+  const traces = [];
+  if (lo) {
+    const keepIdx = d.sessions.map((_, i) => i).filter((i) => d.sessions[i][lo] != null && d.sessions[i][hi] != null);
+    traces.push({ x: keepIdx.map((i) => dates[i]).concat(keepIdx.map((i) => dates[i]).reverse()), y: keepIdx.map((i) => d.sessions[i][hi]).concat(keepIdx.map((i) => d.sessions[i][lo]).reverse()),
+      mode: "lines", fill: "toself", fillcolor: rgba("#378ADD", 0.16), line: { width: 0 }, hoverinfo: "skip", showlegend: false });
+  }
+  traces.push({ x: dates, y, mode: "lines+markers", connectgaps: true, line: { color: css("--accent"), width: 2 }, marker: { size: 9, color: css("--accent") }, showlegend: false,
+    customdata: d.sessions.map((s) => [s.shots, s.tolerance_mph]), hovertemplate: "%{y:.1f}   %{customdata[0]} shots   tolerance %{customdata[1]} mph<extra></extra>" });
+  draw("dr-plot", traces, baseLayout({
+    xaxis: { type: "category", categoryorder: "array", categoryarray: dates, tickvals: dates, ticktext: labels, showgrid: true },
+    yaxis: { title: { text: title }, showgrid: true, zeroline: key === "bias_mph", rangemode: key === "bias_mph" ? "normal" : "tozero" },
+  }));
+  $("dr-plot-note").textContent = `${d.sessions.length} sessions, ${d.total_shots} shots${wedge ? " with the " + wedge : ""}. The band is the ${Math.round(d.level * 100)}% interval of each session.`
+    + (key === "carry_mae_m" && y.every((v) => v == null) ? " No session has enough carries entered yet." : "");
+  $("dr-sessions-table").innerHTML = "<tr><th style='text-align:left'>Session</th><th>Shots</th><th>Average miss</th><th>Tendency</th><th>Within tolerance</th><th>Spread</th><th>Carry miss</th></tr>"
+    + d.sessions.slice().reverse().map((s) => `<tr><td style="text-align:left">${dateLabel(s.date)} ${s.started.slice(11, 16)}</td><td>${s.shots}</td>`
+      + `<td>${num(s.mae_mph, 1)} mph <span class="pm">(${num(s.mae_m, 1)} m)</span></td><td>${signed(s.bias_mph, 1)} mph</td>`
+      + `<td>${num(s.hit_rate, 0)}% <span class="pm">(&plusmn;${num(s.tolerance_mph, 1)} mph)</span></td><td>${num(s.sd_mph, 1)} mph</td><td>${s.carry_mae_m == null ? "&ndash;" : num(s.carry_mae_m, 1) + " m"}</td></tr>`).join("");
+
+  const names = d.targets.map((t) => (wedge ? `${t.target_m.toFixed(0)} m` : `${t.wedge} ${t.target_m.toFixed(0)} m`));
+  draw("dr-target-plot", [{ x: names, y: d.targets.map((t) => t.mae_mph), type: "bar", marker: { color: rgba("#378ADD", 0.7) }, showlegend: false,
+    customdata: d.targets.map((t) => [t.shots, t.target_mph, t.bias_mph]), hovertemplate: "%{x}: %{y:.1f} mph average miss<br>target %{customdata[1]:.0f} mph, %{customdata[0]} shots, tendency %{customdata[2]:+.1f} mph<extra></extra>" }],
+    baseLayout({ xaxis: { type: "category", categoryorder: "array", categoryarray: names }, yaxis: { title: { text: "Average miss (mph)" }, rangemode: "tozero", showgrid: true } }));
+}
+
+// ---------------------------------------------------------------- driver against the optimal chart
+
+async function swingDriver() {
+  const d = await api("/api/swing/driver", { params: { label: $("dv-club").value } });
+  const labels = d.labels || [];
+  fillSelect($("dv-club"), ["", ...labels], ["All drivers", ...labels]);
+  $("dv-club-label").hidden = labels.length < 2;
+  $("dv-card").hidden = !labels.length && !d.notes.length;
+  const detail = ["dv-facts", "dv-scenarios", "dv-scenario-note", "dv-map", "dv-map-note", "dv-progress", "dv-progress-note", "dv-chart", "dv-chart-note"];
+  if (!d.ok) {
+    $("dv-verdict").textContent = d.reason + (d.notes.length ? " " + d.notes.join("; ") + "." : "");
+    for (const id of detail) $(id).hidden = true;
+    return;
+  }
+  for (const id of detail) $(id).hidden = false;
+  $("dv-verdict").textContent = d.verdict;
+  const t = d.typical, g = d.gaps, w = d.window;
+  const iv = (x, digits, unit) => (x.lo == null ? `${signed(x.mean, digits)} ${unit}` : `${signed(x.mean, digits)} ${unit} (95% interval ${signed(x.lo, digits)} to ${signed(x.hi, digits)})`);
+  $("dv-facts").innerHTML = [
+    `Launch angle: ${iv(g.launch, 1, "deg")} against the chart, on average over your shots.`,
+    `Spin rate: ${iv(g.spin, 0, "rpm")} against the chart.`,
+    `Shots close to the chart (launch within ${w.launch} deg and spin within ${w.spin} rpm of its value): ${num(d.close, 0)}%.`,
+    `Average over all your shots, each against the chart value for its own ball speed and attack angle: gain if only the launch angle were at the chart value ${iv(d.gains.launch, 1, "m")}; only the spin ${iv(d.gains.spin, 1, "m")}; both ${iv(d.gains.both, 1, "m")}.`,
+    `Flight model: reproduces the carry of your ${d.model.n} driver shots to ${num(d.model.rmse, 1)} m (the carries spread by ${num(d.model.carry_sd, 1)} m, ${Math.round(100 * d.model.r2)}% explained). ${d.n} shots in ${d.sessions} sessions.`,
+  ].map((x) => `<li>${x}</li>`).join("");
+
+  const rows = d.scenarios.map((s) => `<tr><td style="text-align:left">${s.name}</td><td>${num(s.launch, 1)}</td><td>${num(s.spin, 0)}</td><td>${num(s.carry, 1)}</td>`
+    + `<td>${s.kind === "now" ? "" : signed(s.gain, 1)}</td><td>${s.gain_over_chart == null ? "" : signed(s.gain_over_chart, 1)}</td></tr>`).join("");
+  $("dv-scenarios").innerHTML = "<tr><th style='text-align:left'>For a typical shot of yours</th><th>Launch (deg)</th><th>Spin (rpm)</th><th>Carry, model (m)</th><th>Gain (m)</th><th>Gain over the chart values at your attack angle (m)</th></tr>" + rows;
+  $("dv-scenario-note").textContent = `The numbers above average every shot; this table is for one typical shot, so they differ a little. A typical shot has your average ball speed (${num(t.ball_mph, 0)} mph) and angle of attack (${signed(t.aoa_deg, 1)} deg). The attack angle rows assume that you also reach the chart's launch angle and spin for the higher attack angle, which is the optimistic case. The model reproduces your carries to ${num(d.model.rmse, 1)} m, so treat a gain of about a metre as within its accuracy.`;
+
+  // the carry the model gives over launch angle and spin, your shots, you and the chart
+  const traces = [
+    { type: "contour", x: d.map.launch, y: d.map.spin, z: d.map.carry, colorscale: "Viridis", contours: { coloring: "heatmap", showlabels: true, labelfont: { size: 10, color: "white" } },
+      colorbar: { title: { text: "model carry (m)", side: "right" }, thickness: 12 }, hovertemplate: "launch %{x:.1f} deg, spin %{y:.0f} rpm: %{z:.0f} m<extra></extra>", name: "model" },
+    { x: d.points.map((p) => p.launch), y: d.points.map((p) => p.spin), mode: "markers", name: "your shots", marker: { size: 5, color: "rgba(255,255,255,0.55)", line: { color: "rgba(0,0,0,0.6)", width: 0.5 } },
+      customdata: d.points.map((p) => p.carry), hovertemplate: "launch %{x:.1f}, spin %{y:.0f}, carry %{customdata:.0f} m<extra>shot</extra>" },
+    { x: [t.launch, t.opt_launch], y: [t.spin, t.opt_spin], mode: "lines", line: { color: "white", dash: "dot", width: 2 }, hoverinfo: "skip", showlegend: false },
+    { x: [t.launch], y: [t.spin], mode: "markers", name: "your average", marker: { symbol: "x", size: 13, color: "white", line: { color: "black", width: 2 } } },
+    { x: [t.opt_launch], y: [t.opt_spin], mode: "markers", name: "chart value", marker: { symbol: "star", size: 18, color: "#ffd43b", line: { color: "black", width: 1 } } },
+  ];
+  draw("dv-map", traces, baseLayout({
+    xaxis: { title: { text: "Launch angle (deg)" }, showgrid: true, range: [d.map.launch[0], d.map.launch[d.map.launch.length - 1]] },
+    yaxis: { title: { text: "Spin rate (rpm)" }, showgrid: true, range: [d.map.spin[0], d.map.spin[d.map.spin.length - 1]] },
+    legend: { orientation: "h", y: 1.12 },
+  }));
+  $("dv-map-note").textContent = `Colours: the carry of the model at your average ball speed (${num(t.ball_mph, 0)} mph); the model is fitted to your shots, the star is the chart's value for your average ball speed and attack angle. The chart aims at the best total distance, so its star need not sit at the very top of the carry map.`;
+
+  const labelsX = d.session_rows.map((r) => r.session);
+  draw("dv-progress", [
+    { x: labelsX, y: d.session_rows.map((r) => r.launch_gap), name: "launch gap (deg)", mode: "lines+markers", line: { color: css("--accent"), width: 2 }, marker: { size: 8 },
+      customdata: d.session_rows.map((r) => [r.shots, r.close]), hovertemplate: "launch gap %{y:+.1f} deg, %{customdata[0]} shots, %{customdata[1]:.0f}% close to the chart<extra></extra>" },
+    { x: labelsX, y: d.session_rows.map((r) => r.gain), name: "gain at the chart values (m)", mode: "lines+markers", yaxis: "y2", line: { color: "#D4537E", width: 2, dash: "dot" }, marker: { size: 8, symbol: "diamond" },
+      hovertemplate: "gain %{y:+.1f} m<extra></extra>" },
+  ], baseLayout({
+    xaxis: { type: "category", categoryorder: "array", categoryarray: labelsX, tickvals: labelsX, ticktext: labelsX.map(dateLabel), showgrid: true },
+    yaxis: { title: { text: "Launch gap (deg, 0 = chart value)" }, showgrid: true, zeroline: true, zerolinewidth: 2 },
+    yaxis2: { title: { text: "Carry gain (m)" }, overlaying: "y", side: "right", showgrid: false, rangemode: "tozero", tickformat: ".0f", nticks: 6 },
+    margin: { l: 56, r: 76, t: 10, b: 40 },
+    legend: { orientation: "h", y: 1.14 },
+  }));
+  $("dv-progress").style.height = "320px";
+  $("dv-progress-note").textContent = "Per session, the average launch gap (negative = launch below the chart value) and the average carry the model gives for hitting the chart's launch angle and spin. Both should move towards zero as the launch conditions improve.";
+
+  // the chart itself, with the cell of your usual shot marked
+  const c = d.chart;
+  const near = (list, v) => list.reduce((best, x, i) => (Math.abs(x - v) < Math.abs(list[best] - v) ? i : best), 0);
+  const row = near(c.speeds, t.ball_mph), col = near(c.aoas, t.aoa_deg);
+  $("dv-chart").innerHTML = `<tr><th>Ball speed (mph) \\ attack angle (deg)</th>${c.aoas.map((a) => `<th>${signed(a, 0)}</th>`).join("")}</tr>`
+    + c.speeds.map((s, i) => `<tr><td>${s.toFixed(0)}</td>${c.aoas.map((a, j) => `<td${i === row && j === col ? ' style="background:rgba(255,212,59,0.35);font-weight:600"' : ""}>${c.launch[i][j].toFixed(1)}&deg;<br><span class="pm">${c.spin[i][j].toFixed(0)} rpm</span></td>`).join("")}</tr>`).join("");
+  $("dv-chart-note").innerHTML = `Optimal launch angle and spin by ball speed and angle of attack; the cell nearest to your usual shot is marked. To change it, edit <b>driver_optimal_launch.csv</b> and <b>driver_optimal_spin.csv</b> in <code>${d.folder}</code> and press Load data.`;
 }
 
 // ---------------------------------------------------------------- stack
@@ -991,7 +1245,7 @@ async function makeCard(mode, prefix) {
 
 // ---------------------------------------------------------------- tabs and start
 
-const refreshers = { sessions: loadSessions, swing: loadSwing, pitching: loadPitching, stack: loadStack, rounds: loadRounds, garmin: loadGarmin, bag: loadBag, wedges: loadWedges };
+const refreshers = { sessions: loadSessions, swing: loadSwing, pitching: loadPitching, drill: loadDrill, stack: loadStack, rounds: loadRounds, garmin: loadGarmin, bag: loadBag, wedges: loadWedges };
 
 async function showTab(name) {
   currentTab = name;
@@ -1011,6 +1265,14 @@ function wire() {
   $("browse-garmin").addEventListener("click", guard(() => browse("garmin")));
   $("browse-withings").addEventListener("click", guard(() => browse("withings")));
   $("browse-competition").addEventListener("click", guard(() => browse("competition")));
+  $("browse-drill").addEventListener("click", guard(() => browse("drill")));
+  $("dr-start").addEventListener("click", guard(startDrill));
+  $("dr-save").addEventListener("click", guard(saveDrillShot));
+  $("dr-back").addEventListener("click", guard(async () => drillBack()));
+  $("dr-finish").addEventListener("click", guard(finishDrill));
+  for (const id of ["dr-speed", "dr-carry"]) $(id).addEventListener("keydown", (event) => { if (event.key === "Enter") guard(saveDrillShot)(); });
+  $("dr-unfinished").addEventListener("click", (event) => { const b = event.target.closest("button[data-session]"); if (b) guard(() => resumeDrill(b.dataset.session))(); });
+  for (const id of ["dr-measure", "dr-wedge"]) $(id).addEventListener("change", guard(drillProgress));
   wireRoundSelection("competition", "rc-table");
   wireRoundSelection("garmin", "rl-table");
   for (const id of ["st-avg", "st-max"]) $(id).addEventListener("change", guard(loadStack));
@@ -1026,6 +1288,7 @@ function wire() {
   for (const id of ["sw-club", "sw-metric"]) $(id).addEventListener("change", guard(swingProgress));
   for (const id of ["sw-disp-club", "sw-disp-session", "sw-disp-compare"]) $(id).addEventListener("change", guard(swingDispersion));
   $("lv-club").addEventListener("change", guard(swingLevers));
+  $("dv-club").addEventListener("change", guard(swingDriver));
   $("sw-card").addEventListener("click", guard(() => makeCard("swing", "sw")));
 
   for (const id of ["pt-session", "pt-baseline"]) $(id).addEventListener("change", guard(pitchingReview));

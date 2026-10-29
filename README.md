@@ -2,7 +2,7 @@
 
 Analysis of FlightScope indoor practice sessions and of stack (overspeed) training, in two parts, plus an optional look at how your sleep and training (from a Garmin watch) relate to your results:
 
-- **A dashboard** to review the latest session, follow your progress over time, and see how your carry and your misses are distributed, for full swings and for wedge swings with different intents (9, 10, 11 o'clock), and the progress of your stack training per weight. The Full swing tab also shows which factors (smash factor, launch angle, spin, attack angle, face to path ...) go with the carry of each club. The **Rounds** tab follows your competition scores (kept on record from the handicap certificate PDF) and the statistics of your rounds from the Garmin app (fairways, greens, putting). The **Health** tab shows your Garmin sleep and recovery trends and your Withings weight and body composition, and relates your results to sleep, recovery and strength or cardio training before each session.
+- **A dashboard** to review the latest session, follow your progress over time, and see how your carry and your misses are distributed, for full swings and for wedge swings with different intents (9, 10, 11 o'clock), and the progress of your stack training per weight. The Full swing tab shows target bands for attack angle, club path, face to path and dynamic loft (ranges in the editable `targets/` files) and compares the driver with the PING optimal launch and spin chart. The Drill tab runs a wedge distance-control drill (target club head speeds for random wedges and distances, saved session by session, with your progress). The Full swing tab also shows which factors (smash factor, launch angle, spin, attack angle, face to path ...) go with the carry of each club. The **Rounds** tab follows your competition scores (kept on record from the handicap certificate PDF) and the statistics of your rounds from the Garmin app (fairways, greens, putting). The **Health** tab shows your Garmin sleep and recovery trends and your Withings weight and body composition, and relates your results to sleep, recovery and strength or cardio training before each session.
 - **Printed cards** with the carry distance of each club and its distribution, to take to the course.
 
 Everything runs on your own computer. The data never leaves it.
@@ -44,6 +44,8 @@ After a practice session:
 | `golf.local.json` | Your own choices from the dashboard (folders, sessions, bag). Created automatically, not committed |
 | `SwingData/`, `PitchingData/`, `stackdata/` | Your exported sessions (the folders can be anywhere; these are the defaults). Not committed |
 | `garmindata/`, `withingsdata/` | Your Garmin and Withings data exports (optional). Not committed |
+| `targets/` | Target ranges per club and the driver's optimal launch and spin chart: plain files you edit. Committed |
+| `DrillData/` | The sessions of the wedge drill, one CSV file each. Created when you start a session. Not committed |
 | `CompetitionResults/` | Your handicap certificates (PDF) and the record of competition rounds made from them (`python -m golf rounds`). Not committed |
 | `Output/` | Generated cards. Not committed |
 | `Analysis_legacy/` | The original scripts, kept for comparison until the new code is trusted |

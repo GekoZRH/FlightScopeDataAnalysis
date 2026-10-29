@@ -60,3 +60,17 @@ def bootstrap_ci(
     tail = (1.0 - level) / 2.0 * 100
     low, high = np.percentile(estimates, [tail, 100 - tail])
     return float(low), float(high)
+
+
+def wilson_interval(hits: int, n: int, level: float = 0.95):
+    """Wilson interval of a share, in percent: (low, high), or (None, None) without shots."""
+    import math
+    from scipy import stats as _stats
+
+    if n == 0:
+        return None, None
+    z = _stats.norm.ppf(0.5 + level / 2.0)
+    p = hits / n
+    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
+    half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
+    return 100.0 * (centre - half), 100.0 * (centre + half)

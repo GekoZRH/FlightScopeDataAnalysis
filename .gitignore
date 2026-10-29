@@ -1,5 +1,6 @@
 # Personal data and results: never commit
 *.csv
+!targets/*.csv
 SwingData/
 PitchingData/
 stackdata/
@@ -7,6 +8,7 @@ stackdata_original/
 garmindata/
 withingsdata/
 CompetitionResults/
+DrillData/
 Plot/
 Output/
 golf.local.json
